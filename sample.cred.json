@@ -1,0 +1,9 @@
+{
+  "host" : "yourname.trovebox.com",
+  "consumerKey" : "yourConsumerKey",
+  "consumerSecret" : "yourConsumerSecret",
+  "token" : "yourOAuthToken", 
+  "tokenSecret" : "yourOAuthSecret",
+  "albumPath" : "/absolute/path/to/your/local/album/folder"
+}
+
