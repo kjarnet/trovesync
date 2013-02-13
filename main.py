@@ -15,6 +15,7 @@ print cred
 
 """ Initialize a webservice client """
 albumPath = cred["albumPath"]
+pageSize = cred["maxPhotos"]
 client = OpenPhoto(
   cred["host"],
   cred["consumerKey"],
@@ -38,7 +39,7 @@ albumId = raw_input("Enter id-number of album to synchronize against the folder 
   albumPath + ": ")
 
 """ Get list of remote images """
-imgresp = json.loads(client.get(PHOTOS_LIST))
+imgresp = json.loads(client.get(PHOTOS_LIST, {"pageSize": pageSize}))
 imgmessage = imgresp["message"]
 imgcode = imgresp["code"]
 imgresult = imgresp["result"]
@@ -50,6 +51,8 @@ for i in remoteImgs:
   print i["filenameOriginal"]
   print i["hash"]
 print "Count: " + str(len(remoteImgs))
+if len(remoteImgs) >= pageSize:
+  print ("Capped at " + pageSize + " (maxPhotos option).")
 
 for f in listdir(albumPath):
   fullfile = join(albumPath, f)

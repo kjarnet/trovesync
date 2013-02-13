@@ -4,6 +4,7 @@
   "consumerSecret" : "yourConsumerSecret",
   "token" : "yourOAuthToken", 
   "tokenSecret" : "yourOAuthSecret",
-  "albumPath" : "/absolute/path/to/your/local/album/folder"
+  "albumPath" : "/absolute/path/to/your/local/album/folder",
+  "maxPhotos" : 1000
 }
 
