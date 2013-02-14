@@ -52,3 +52,7 @@ but are not in your local album.
    delete the file from your local album
    or ignore the file.
 
+License
+-------
+Released under the MIT License as stated in the file LICENSE.
+
