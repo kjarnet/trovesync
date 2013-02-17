@@ -29,14 +29,19 @@ albresp = json.loads(client.get(ALBUMS_LIST))
 albmessage = albresp["message"]
 albcode = albresp["code"]
 remoteAlbums = albresp["result"]
+ids = []
 print albmessage, "Remote albums: " 
 for a in remoteAlbums:
   print a["id"]
   print a["name"]
+  ids.append(a["id"])
+ids.append("null")
 
 """ Choose an album to synchronize """
 albumId = raw_input("Enter id-number of album to synchronize against the folder " + 
   albumPath + ": ")
+while albumId not in ids:
+  albumId = raw_input("Please enter a valid album id " + str(ids) + ": ")
 
 """ Get list of remote images """
 imgresp = json.loads(client.get(PHOTOS_LIST, {"pageSize": pageSize}))
@@ -76,5 +81,26 @@ remoteonly = [i for i in remoteImgs if "inSync" not in i]
 print "Local only: ", localonly
 print "Remote only: ", remoteonly
 
+""" Choose sync direction """
+direction = raw_input("Do you want to sync [r]emote changes to local folder, [l]ocal changes to remote album or [c]hoose for each picture [r/l/c]? ")
+while direction not in ["r", "l", "c"]:
+  direction = raw_input("Please choose r for remote, l for local or c for custom: ")
 
+""" Synchronize! """
+if direction == "r":
+  for i in localonly:
+    print "move local image to backup location", i
+  for i in remoteonly:
+    print "download image", i["filenameOriginal"]
+elif direction == "l":
+  for i in localonly:
+    print "upload to remote", i
+  for i in remoteonly:
+    print "tag remote image for deletion", i["filenameOriginal"]
+else:
+  for i in localonly:
+    print "give user a choice: delete or upload", i
+  for i in remoteonly:
+    print "give user a choice: delete or download", i["filenameOriginal"]
+  
 
