@@ -5,6 +5,7 @@ from os import listdir, path
 import shutil
 import urllib2
 import oauth2 as oauth
+from poster import encode, streaminghttp
 
 # Trovebox service endpoints:
 PHOTOS_LIST = "/photos/list.json"
@@ -84,24 +85,26 @@ remoteonly = [i for i in remoteImgs if "inSync" not in i]
 print "Local only: ", localonly
 print "Remote only: ", remoteonly
 
-
-
-""" Download file (copied from stackoverflow q. 22676) """
-def download(url, file_name, file_size):
-  print "saving as", file_name
-  " First, build headers using oauth2 (copied from http://pastebin.com/d5n447wq)"
+" First, build headers using oauth2 "
+def getOauthHeaders(url, method):
   parameters = None
   consumer = oauth.Consumer(troveboxClient.consumer_key, troveboxClient.consumer_secret)
   access_token = oauth.Token(troveboxClient.token, troveboxClient.token_secret)
   sig_method = oauth.SignatureMethod_HMAC_SHA1()
 
   oauth_request = oauth.Request.from_consumer_and_token(
-          consumer, token=access_token, http_method="GET", http_url=url, parameters=parameters
+          consumer, token=access_token, http_method=method, http_url=url, parameters=parameters
       )
   oauth_request.sign_request(sig_method, consumer, access_token)
   headers = oauth_request.to_header()
   headers['User-Agent'] = 'Trovesync'
+  return headers
 
+
+""" Download file (copied from stackoverflow q. 22676) """
+def download(url, file_name, file_size):
+  print "saving as", file_name
+  headers = getOauthHeaders(url, "GET")
   u = urllib2.urlopen(urllib2.Request(url, headers=headers))
   f = open(file_name, 'wb')
   meta = u.info()
@@ -114,16 +117,19 @@ def download(url, file_name, file_size):
       buffer = u.read(block_sz)
       if not buffer:
           break
-
       file_size_dl += len(buffer)
       f.write(buffer)
       status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
       status = status + chr(8)*(len(status)+1)
       print status
-
   f.close()
 
-
+def upload(url, file_name):
+  streaminghttp.register_openers()
+  datagen, headers = encode.multipart_encode({"photo": open(file_name, "rb")})
+  headers.update(getOauthHeaders(url, "POST"))
+  request = urllib2.urlopen(urllib2.Request(url, datagen, headers))
+  print request.read()
 
 """ Choose sync direction """
 direction = raw_input("Do you want to sync [r]emote changes to local folder, [l]ocal changes to remote album or [c]hoose for each picture [r/l/c]? ")
@@ -131,12 +137,7 @@ while direction not in ["r", "l", "c"]:
   direction = raw_input("Please choose r for remote, l for local or c for custom: ")
 
 
-
-
-
-backupPath = cred["backupPath"]
-""" Synchronize! """
-if direction == "r":
+def syncFromRemote():
   for i in localonly:
     fullfile = path.join(albumPath, f)
     print "move local image ", fullfile, "to backup location", backupPath
@@ -144,15 +145,26 @@ if direction == "r":
   for i in remoteonly:
     print "download image", i["filenameOriginal"]
     download(i["pathDownload"], path.join(albumPath, i["filenameOriginal"]), int(i["size"])*1024)
-elif direction == "l":
+
+def syncFromLocal():
   for i in localonly:
     print "upload to remote", i
   for i in remoteonly:
     print "tag remote image for deletion", i["filenameOriginal"]
-else:
+
+def syncCustom():
   for i in localonly:
     print "give user a choice: delete or upload", i
   for i in remoteonly:
     print "give user a choice: delete or download", i["filenameOriginal"]
+
+backupPath = cred["backupPath"]
+""" Synchronize! """
+if direction == "r":
+  syncFromRemote()
+elif direction == "l":
+  syncFromLocal()
+else:
+  syncCustom()
   
 
