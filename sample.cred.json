@@ -5,6 +5,7 @@
   "token" : "yourOAuthToken", 
   "tokenSecret" : "yourOAuthSecret",
   "albumPath" : "/absolute/path/to/your/local/album/folder",
+  "backupPath" : "/absolute/path/to/your/backup/folder",
   "maxPhotos" : 1000
 }
 

@@ -53,6 +53,27 @@ but are not in your local album.
    delete the file from your local album
    or ignore the file.
 
+Known Issues
+------------
+Because Trovebox currently autorotate all uploaded images
+with exiftran
+_before_ storing the original
+and exiftran (for reasons unknown) adds some bytes to the file
+irrespective of whether the image needs rotation or not
+the actual _original_ version of the file is not available
+for downloading from trovebox (see [issue at github]
+(https://github.com/photo/frontend/issues/1149)).
+Furthermore, because the hash stored with the image on Trovebox
+is generated from the _actual original_,
+and as trovesync uses this hash to compare files
+syncing from Trovebox will be faulty.
+There are two ways to work around this problem
+(until Trovebox hopefully changes this behaviour):
+
+1. Run all your images through exiftran autorotation locally
+_before_ uploading to Trovebox.
+2. Ask Trovebox support kindly to disable exiftran for your account.
+
 License
 -------
 Released under the MIT License as stated in the file LICENSE.

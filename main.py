@@ -4,12 +4,18 @@ import hashlib
 from os import listdir, path
 import shutil
 import urllib2
+import urllib
 import oauth2 as oauth
 from poster import encode, streaminghttp
 
 # Trovebox service endpoints:
-PHOTOS_LIST = "/photos/list.json"
 ALBUMS_LIST = "/albums/list.json"
+PHOTOS_LIST = "/photos/list.json"
+PHOTO_UPLOAD = "/photo/upload.json"
+PHOTO_UPDATE = "/photo/%s/update.json"
+
+# Other constants:
+DELETE_TAG = "trovesyncDelete"
 
 """ Get Credentials """
 with open("./cred.json") as credfile:
@@ -32,11 +38,11 @@ albresp = json.loads(troveboxClient.get(ALBUMS_LIST))
 albmessage = albresp["message"]
 albcode = albresp["code"]
 remoteAlbums = albresp["result"]
+print "Response from GET " + ALBUMS_LIST + ":", albmessage
 ids = []
-print albmessage, "Remote albums: " 
+print "Remote albums: " 
 for a in remoteAlbums:
-  print a["id"]
-  print a["name"]
+  print "[" + a["id"] + "] " + a["name"]
   ids.append(a["id"])
 ids.append("null")
 
@@ -51,26 +57,26 @@ imgresp = json.loads(troveboxClient.get(PHOTOS_LIST, {"pageSize": pageSize}))
 imgmessage = imgresp["message"]
 imgcode = imgresp["code"]
 imgresult = imgresp["result"]
+print "Response from GET " + PHOTOS_LIST + ":", imgmessage
 remoteImgs = [i for i in imgresult if albumId in i["albums"]]
-# remoteImgs = imgresult
-print imgmessage
+print "Remote images:"
 for i in remoteImgs:
-  print i["albums"]
-  print i["filenameOriginal"]
-  print i["hash"]
+  print "albums:", i["albums"], "/",  i["filenameOriginal"]
+  print "  ", i["hash"]
 print "Count: ", len(remoteImgs)
 if len(remoteImgs) >= pageSize:
   print ("Capped at " + pageSize + " (maxPhotos option).")
 
 """ Loop through local files and compare against remote images """
 localonly = []
+print "Local files:"
 for f in listdir(albumPath):
   fullfile = path.join(albumPath, f)
   if not path.isfile(fullfile): continue
   print fullfile
   with open(fullfile, "rb") as imgFile:
     sha = hashlib.sha1(imgFile.read()).hexdigest()
-    print sha
+    print "  ", sha
   found = False
   for i in remoteImgs:
     if i["hash"] == sha:
@@ -83,7 +89,7 @@ remoteonly = [i for i in remoteImgs if "inSync" not in i]
 
 
 print "Local only: ", localonly
-print "Remote only: ", remoteonly
+print "Remote only: ", [i["filenameOriginal"] for i in remoteonly]
 
 " First, build headers using oauth2 "
 def getOauthHeaders(url, method):
@@ -106,30 +112,33 @@ def download(url, file_name, file_size):
   print "saving as", file_name
   headers = getOauthHeaders(url, "GET")
   u = urllib2.urlopen(urllib2.Request(url, headers=headers))
-  f = open(file_name, 'wb')
-  meta = u.info()
-  print meta
-  print "Downloading: %s Bytes: %s" % (file_name, file_size)
+  with open(file_name, 'wb') as f:
+    meta = u.info()
+    print "Response from GET " + url + ":", meta
+    print "Downloading: %s Bytes: %s" % (file_name, file_size)
 
-  file_size_dl = 0
-  block_sz = 8192
-  while True:
+    file_size_dl = 0
+    block_sz = 8192
+    while True:
       buffer = u.read(block_sz)
       if not buffer:
-          break
+        break
       file_size_dl += len(buffer)
       f.write(buffer)
       status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
       status = status + chr(8)*(len(status)+1)
       print status
-  f.close()
+    return meta
 
-def upload(url, file_name):
+def upload(url, file_name, parameters):
+  encparams = urllib.urlencode(parameters)
+  urlWithParams = url + "?" + encparams
   streaminghttp.register_openers()
   datagen, headers = encode.multipart_encode({"photo": open(file_name, "rb")})
-  headers.update(getOauthHeaders(url, "POST"))
-  request = urllib2.urlopen(urllib2.Request(url, datagen, headers))
-  print request.read()
+  headers.update(getOauthHeaders(urlWithParams, "POST"))
+  request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
+  response = request.read()
+  return response
 
 """ Choose sync direction """
 direction = raw_input("Do you want to sync [r]emote changes to local folder, [l]ocal changes to remote album or [c]hoose for each picture [r/l/c]? ")
@@ -138,27 +147,36 @@ while direction not in ["r", "l", "c"]:
 
 
 def syncFromRemote():
-  for i in localonly:
+  for f in localonly:
     fullfile = path.join(albumPath, f)
+    backupPath = cred["backupPath"]
     print "move local image ", fullfile, "to backup location", backupPath
-    #shutil.move(fullfile, backupPath)
+    shutil.move(fullfile, backupPath)
   for i in remoteonly:
     print "download image", i["filenameOriginal"]
-    download(i["pathDownload"], path.join(albumPath, i["filenameOriginal"]), int(i["size"])*1024)
+    respDownload = json.loads(download(i["pathDownload"], path.join(albumPath, i["filenameOriginal"]), int(i["size"])*1024))
+    print "Response from GET " + i["pathDownload"] + ": " + respDownload["message"]
 
 def syncFromLocal():
-  for i in localonly:
-    print "upload to remote", i
+  for f in localonly:
+    print "upload to remote", f
+    url = "http://" + cred["host"] + PHOTO_UPLOAD
+    fullfile = path.join(albumPath, f)
+    respUpload = json.loads(upload(url, fullfile, {"albums": albumId}))
+    print "Response from POST " + url + ":", respUpload["message"]
+
   for i in remoteonly:
     print "tag remote image for deletion", i["filenameOriginal"]
+    url = PHOTO_UPDATE % i["id"]
+    respTagPhoto = json.loads(troveboxClient.post(url, {"tagsAdd": DELETE_TAG}))
+    print "Response from POST " + url + ":", respTagPhoto["message"]
 
 def syncCustom():
-  for i in localonly:
-    print "give user a choice: delete or upload", i
+  for f in localonly:
+    print "give user a choice: delete or upload", f
   for i in remoteonly:
     print "give user a choice: delete or download", i["filenameOriginal"]
 
-backupPath = cred["backupPath"]
 """ Synchronize! """
 if direction == "r":
   syncFromRemote()
