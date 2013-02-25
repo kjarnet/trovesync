@@ -4,8 +4,12 @@
   "consumerSecret" : "yourConsumerSecret",
   "token" : "yourOAuthToken", 
   "tokenSecret" : "yourOAuthSecret",
-  "albumPath" : "/absolute/path/to/your/local/album/folder",
-  "backupPath" : "/absolute/path/to/your/backup/folder",
-  "maxPhotos" : 1000
+  "albumsPath" : "/absolute/path/to/your/local/album/folder",
+  "backupDirName" : "backupFolderName",
+  "maxPhotos" : 1000,
+  "albums" : [
+      {"localName" : "localAlbum1", "remoteName" : "remoteAlbum1"},
+      {"localName" : "localAlbum2", "remoteName" : "remoteAlbum2"}
+    ]
 }
 
