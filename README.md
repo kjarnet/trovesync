@@ -1,7 +1,18 @@
 TroveSync
 =========
 
-Application for synchronizing a local folder with a trovebox.com album
+Application for synchronizing a local folder with a trovebox.com album.
+
+Current status
+--------------
+I'll probably break the master version quite often
+as I'm doing all work here (no feature branches).
+I'm trying to tag versions that I consider working
+but this is still very much pre-alpha software
+and I give no guarantees that it doesn't
+delete your local and/or remote photos.
+See change history for what features are supported
+in which versions.
 
 Dependencies
 ------------
@@ -18,16 +29,13 @@ on your Trovebox site
 by creating a new app.
 2. Copy sample.cred.json to cred.json
 and replace with your credentials
-and album path.
+and path to the folder
+holding your local copy of the album.
 3. Run `python main.py`.
 4. When prompted,
-open the folders "localonly" and "remoteonly".
-Files in the localonly folder
-are copies of files that exist in you local album
-but are not in Trovebox.
-Files in the remoteonly folder
-are files you have stored in Trovebox
-but are not in your local album.
+choose the remote album
+to sync with your local folder
+by entering it's numeric id.
 5. You now get three choices:
    1. "Sync from Trovebox":
    Choose this to make your local folder
@@ -44,7 +52,7 @@ but are not in your local album.
    will be uploaded to the Trovebox album.
    For each file in the remoteonly folder
    the corresponding file will be deleted from Trovebox.
-   3. "Manual":
+   3. "Manual" (not yet implemented):
    This will go through each file in both folders
    and prompt you to choose whether to
    upload the file to Trovebox,
@@ -74,7 +82,17 @@ There are two ways to work around this problem
 _before_ uploading to Trovebox.
 2. Ask Trovebox support kindly to disable exiftran for your account.
 
-License
+Change history
+--------------
+#### Version 0.1
+- First working version with basic functionality
+- Synchronize single local folder with single (existing) remote album.
+- Does "soft delete" locally by moving files to a backup folder, 
+and remotely by tagging images with "trovesyncDelete".
+
+Disclaimer
 -------
+I do not take any responsibility for any lost photos or information
+resulting from the use of this application.
 Released under the MIT License as stated in the file LICENSE.
 
