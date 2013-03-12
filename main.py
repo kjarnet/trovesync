@@ -19,29 +19,28 @@ class Picture:
     self.localname = ""
 
 class Album:
-  def __init__(self, localid, remotename):
+  def __init__(self, localpath, remoteId, backupPath):
     self.localonly = []
     self.remoteonly = []
-    self.localid = localid
-    self.remotename = remotename
+    self.localpath = localpath
+    self.remoteId = remoteId
+    self.backupPath = backupPath
 
   def syncFromRemote(self, client):
     for f in self.localonly:
-      fullfile = path.join(albumsPath, f)
-      backupDirName = cred["backupDirName"]
-      print "move local image ", fullfile, "to backup location", backupDirName
-      shutil.move(fullfile, backupPath)
+      fullfile = path.join(self.localpath, f)
+      print "move local image ", fullfile, "to backup location", self.backupPath
+      shutil.move(fullfile, self.backupPath)
     for i in self.remoteonly:
       print "download image", i["filenameOriginal"]
-      respDownload = json.loads(client.download(i["pathDownload"], path.join(albumPath, i["filenameOriginal"]), int(i["size"])*1024))
+      respDownload = json.loads(client.download(i["pathDownload"], path.join(self.localpath, i["filenameOriginal"]), int(i["size"])*1024))
       print "Response from GET " + i["pathDownload"] + ": " + respDownload["message"]
 
   def syncFromLocal(self, client):
     for f in self.localonly:
       print "upload to remote", f
-      url = "http://" + cred["host"] + PHOTO_UPLOAD
-      fullfile = path.join(albumPath, f)
-      respUpload = json.loads(client.upload(url, fullfile, {"albums": albumId}))
+      fullfile = path.join(self.localpath, f)
+      respUpload = json.loads(client.uploadPhoto(self.remoteId, fullfile))
       print "Response from POST " + url + ":", respUpload["message"]
 
     for i in self.remoteonly:
@@ -69,19 +68,19 @@ class BetterClient:
 
   def __init__(
               self, 
-              host, 
+              hostName, 
               consumerKey,
               consumerSecret,
               token,
               tokenSecret,
               pageSize):
     " Constructor for proxy-client "
-    self.host = host
+    self.hostName = hostName
     self.consumerKey = consumerKey
     self.consumerSecret = consumerSecret
     self.token = token
     self.tokenSecret = tokenSecret
-    self.opClient = OpenPhoto(host, consumerKey, consumerSecret,
+    self.opClient = OpenPhoto(hostName, consumerKey, consumerSecret,
                           token, tokenSecret)
     self.pageSize = pageSize
   
@@ -93,7 +92,7 @@ class BetterClient:
     print "Response from GET " + BetterClient.ALBUMS_LIST + ":", albmessage
     return remoteAlbums
 
-  def getAlbumPhotos(self, albumdId):
+  def getAlbumPhotos(self, albumId):
     imgresp = json.loads(self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize}))
     imgmessage = imgresp["message"]
     imgcode = imgresp["code"]
@@ -146,12 +145,16 @@ class BetterClient:
         print status
       return meta
 
+  def uploadPhoto(self, albumId, fileName):
+    url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
+    return self.upload(url, fileName, {"albums": albumId})
+    
   def upload(self, url, file_name, parameters):
     encparams = urllib.urlencode(parameters)
     urlWithParams = url + "?" + encparams
     streaminghttp.register_openers()
     datagen, headers = encode.multipart_encode({"photo": open(file_name, "rb")})
-    headers.update(getOauthHeaders(urlWithParams, "POST"))
+    headers.update(self.getOauthHeaders(urlWithParams, "POST"))
     request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
     response = request.read()
     return response
@@ -185,12 +188,15 @@ def sync():
     for a in remoteAlbums:
       found = False
       if m["remoteName"] == a["name"]:
-        albums.append(Album(a["id"], m["localName"]))
+        localPath = path.join(albumsPath, m["localName"])
+        backupPath = path.join(localPath, cred["backupDirName"])
+        albums.append(Album(localPath, a["id"], backupPath))
         found = True
         break
     if not found:
-      raise Exception("Found no remote album named" + m["remoteName"] +" in " + str(remoteAlbums))
-  print albums
+      remoteAlbumNames = [a["name"] for a in remoteAlbums]
+      raise Exception("Found no remote album named " + m["remoteName"] +" in " + str(remoteAlbumNames))
+  print [a["name"] for a in remoteAlbums]
 
   for album in albums:
     """ Get list of remote images """
@@ -200,13 +206,13 @@ def sync():
       print "albums:", i["albums"], "/",  i["filenameOriginal"]
       print "  ", i["hash"]
     print "Count: ", len(remoteImgs)
-    if len(remoteImgs) >= pageSize:
-      print ("Capped at " + pageSize + " (maxPhotos option).")
+    if len(remoteImgs) >= troveboxClient.pageSize:
+      print ("Capped at " + troveboxClient.pageSize + " (maxPhotos option).")
 
     """ Loop through local files and compare against remote images """
     print "Local files:"
-    for f in listdir(albumPath):
-      fullfile = path.join(albumsPath, f)
+    for f in listdir(album.localpath):
+      fullfile = path.join(album.localpath, f)
       if not path.isfile(fullfile):
         print "Skipping", fullfile, "(is not a file)."
         continue
@@ -234,11 +240,11 @@ def sync():
 
     """ Synchronize! """
     if direction == "r":
-      syncFromRemote()
+      album.syncFromRemote(troveboxClient)
     elif direction == "l":
-      syncFromLocal()
+      album.syncFromLocal(troveboxClient)
     else:
-      syncCustom()
+      album.syncCustom(troveboxClient)
 
 
 if __name__ == "__main__": sync()
