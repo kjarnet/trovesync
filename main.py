@@ -24,13 +24,15 @@ class Picture:
     self.localname = ""
 
 class Album:
-  def __init__(self, localpath, remoteId, backupPath):
+  def __init__(self, localpath, remoteId, backupPath, wsClient):
     self.logger = logging.getLogger(APPNAME + ".Album")
-    self.localonly = []
-    self.remoteonly = []
     self.localpath = localpath
     self.remoteId = remoteId
     self.backupPath = backupPath
+    self.wsClient = wsClient
+    self.localonly = []
+    self.remoteonly = []
+    self.populatePhotos()
 
   def syncFromRemote(self, client):
     for f in self.localonly:
@@ -65,16 +67,51 @@ class Album:
     for i in self.remoteonly:
       self.logger.info("give user a choice: delete or download"+ i["filenameOriginal"])
 
+  def populatePhotos(self):
+    " Get list of remote images "
+    remoteImgs = self.wsClient.getAlbumPhotos(self.remoteId)
+    self.logger.info("Remote images:")
+    for i in remoteImgs:
+      self.logger.info("album(s):"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
+      self.logger.info("  "+ i["hash"])
+    self.logger.info("Count: "+ str(len(remoteImgs)))
+    if len(remoteImgs) >= self.wsClient.pageSize:
+      self.logger.info(("Capped at " + self.wsClient.pageSize + " (maxPhotos option)."))
+
+    """ Loop through local files and compare against remote images,
+        collecting local-onlies and marking common ones. """
+    self.logger.info("Local files:")
+    for f in listdir(self.localpath):
+      fullfile = path.join(self.localpath, f)
+      if not path.isfile(fullfile):
+        self.logger.info("Skipping "+ fullfile+ " (not a file).")
+        continue
+      self.logger.info(fullfile)
+      with open(fullfile, "rb") as imgFile:
+        sha = hashlib.sha1(imgFile.read()).hexdigest()
+        self.logger.info("  "+ sha)
+      found = False
+      for i in remoteImgs:
+        if i["hash"] == sha:
+          i["inSync"] = True
+          found = True
+          break
+      if not found:
+        self.localonly.append(f)
+
+    " Add not-marked remotes to remoteonly. "
+    self.remoteonly = [i for i in remoteImgs if "inSync" not in i]
+
 class BetterClient:
   " A proxy to the OpenPhoto client with added methods for download and upload "
 
-# Trovebox service endpoints:
+  # Trovebox service endpoints:
   ALBUMS_LIST = "/albums/list.json"
   PHOTOS_LIST = "/photos/list.json"
   PHOTO_UPLOAD = "/photo/upload.json"
   PHOTO_UPDATE = "/photo/%s/update.json"
 
-# Other constants:
+  # Other constants:
   DELETE_TAG = "trovesyncDelete"
 
   def __init__(
@@ -97,7 +134,9 @@ class BetterClient:
     self.pageSize = pageSize
   
   def getAlbums(self):
-    albresp = json.loads(self.opClient.get(BetterClient.ALBUMS_LIST)) 
+    rawresp = self.opClient.get(BetterClient.ALBUMS_LIST)
+    #albresp = json.loads(rawresp) 
+    albresp = rawresp #newer op-lib returns ready-parsed response
     albmessage = albresp["message"]
     albcode = albresp["code"]
     remoteAlbums = albresp["result"]
@@ -105,7 +144,9 @@ class BetterClient:
     return remoteAlbums
 
   def getAlbumPhotos(self, albumId):
-    imgresp = json.loads(self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize}))
+    rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
+    #imgresp = json.loads(rawresp)
+    imgresp = rawresp #newer op-lib returns ready-parsed response
     imgmessage = imgresp["message"]
     imgcode = imgresp["code"]
     imgresult = imgresp["result"]
@@ -119,8 +160,8 @@ class BetterClient:
     return respTagPhoto
 
 
-  " First, build headers using oauth2 "
   def getOauthHeaders(self, url, method):
+    " Build headers using oauth2 "
     parameters = None
     consumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
     access_token = oauth.Token(self.token, self.tokenSecret)
@@ -134,17 +175,17 @@ class BetterClient:
     headers['User-Agent'] = 'Trovesync'
     return headers
 
-  """ Download file (copied from stackoverflow q. 22676) """
   def download(self, url, file_name, file_size):
-    self.logger.info("saving as"+ file_name)
+    """ Download file (copied from stackoverflow q. 22676) """
+    self.logger.debug("saving as"+ file_name)
     headers = self.getOauthHeaders(url, "GET")
     requestObject = urllib2.Request(url, headers=headers)
-    self.logger.info("made request"+ requestObject.get_full_url())
+    self.logger.debug("made request"+ requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
     with open(file_name, 'wb') as f:
       meta = u.info()
-      self.logger.info("Response from GET " + url + ":"+ meta)
-      self.logger.info("Downloading: %s Bytes: %s" % (file_name+ file_size))
+      self.logger.debug("Response from GET " + url + ":"+ meta)
+      self.logger.info("Downloading: %s Bytes: %s" % (file_name, file_size))
 
       file_size_dl = 0
       block_sz = 8192
@@ -163,11 +204,12 @@ class BetterClient:
     url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
     return self.upload(url, fileName, {"albums": albumId})
     
-  def upload(self, url, file_name, parameters):
+  def upload(self, url, fileName, parameters):
+    self.logger.debug("Uploading " + fileName + " to " + url)
     encparams = urllib.urlencode(parameters)
     urlWithParams = url + "?" + encparams
     streaminghttp.register_openers()
-    with open(file_name, "rb") as localfile:
+    with open(fileName, "rb") as localfile:
       datagen, headers = encode.multipart_encode({"photo": localfile})
       headers.update(self.getOauthHeaders(urlWithParams, "POST"))
       request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
@@ -200,7 +242,7 @@ def setup():
   " Credentials "
   with open("./cred.json") as credfile:
     cred = json.load(credfile)
-  logger.info("cred.json: "+ str(cred))
+  logger.debug("cred.json: "+ str(cred))
   return cred
 
 def sync(cred):
@@ -219,6 +261,8 @@ def sync(cred):
 
   """ Choose albums to synchronize """
   remoteAlbums = troveboxClient.getAlbums()
+  remoteAlbumNames = [a["name"] for a in remoteAlbums]
+  logger.info(remoteAlbumNames)
   albumMappings = cred["albums"]
   albums = []
   logger.info("Remote albums: " )
@@ -226,62 +270,43 @@ def sync(cred):
     for a in remoteAlbums:
       found = False
       if m["remoteName"] == a["name"]:
-        localPath = path.join(albumsPath, m["localName"])
-        backupPath = path.join(localPath, cred["backupDirName"])
-        albums.append(Album(localPath, a["id"], backupPath))
+        localpath = path.join(albumsPath, m["localName"])
+        backupPath = path.join(localpath, cred["backupDirName"])
+        albums.append((
+          Album(localpath, a["id"], backupPath, troveboxClient), 
+          a["name"]))
         found = True
         break
     if not found:
-      remoteAlbumNames = [a["name"] for a in remoteAlbums]
       raise Exception("Found no remote album named " + m["remoteName"] +" in " + str(remoteAlbumNames))
-  logger.info([a["name"] for a in remoteAlbums])
 
-  for album in albums:
-    """ Get list of remote images """
-    remoteImgs = troveboxClient.getAlbumPhotos(album.remoteId)
-    logger.info("Remote images:")
-    for i in remoteImgs:
-      logger.info("albums:"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
-      logger.info("  "+ i["hash"])
-    logger.info("Count: "+ str(len(remoteImgs)))
-    if len(remoteImgs) >= troveboxClient.pageSize:
-      logger.info(("Capped at " + troveboxClient.pageSize + " (maxPhotos option)."))
-
-    """ Loop through local files and compare against remote images """
-    logger.info("Local files:")
-    for f in listdir(album.localpath):
-      fullfile = path.join(album.localpath, f)
-      if not path.isfile(fullfile):
-        logger.info("Skipping"+ fullfile+ "(is not a file).")
-        continue
-      logger.info(fullfile)
-      with open(fullfile, "rb") as imgFile:
-        sha = hashlib.sha1(imgFile.read()).hexdigest()
-        logger.info("  "+ sha)
-      found = False
-      for i in remoteImgs:
-        if i["hash"] == sha:
-          i["inSync"] = True
-          found = True
-          break
-      if not found:
-        album.localonly.append(f)
-    album.remoteonly = [i for i in remoteImgs if "inSync" not in i]
-
+  direction = ""
+  for album, name in albums:
+    logger.info("Syncing album " + name + " against folder " + album.localpath)
     logger.info("Local only: "+ str(album.localonly))
     logger.info("Remote only: "+ str([i["filenameOriginal"] for i in album.remoteonly]))
 
-    """ Choose sync direction """
-    direction = raw_input("Do you want to sync [r]emote changes to local folder, [l]ocal changes to remote album or [c]hoose for each picture [r/l/c]? ")
-    while direction not in ["r", "l", "c"]:
-      direction = raw_input("Please choose r for remote, l for local or c for custom: ")
+    if "a" not in direction:
+      """ Choose sync direction """
+      syncQuestion = "Do you want to sync " +\
+        "[r]emote changes to local folder, " +\
+        "[l]ocal changes to remote album or " +\
+        "[c]hoose for each picture [r/l/c]? " +\
+        "\n  (add \"a\" to apply to all albums, " +\
+        "i.e. [ra/la/ca])"
+      direction = raw_input(syncQuestion)
+      while direction not in ["r", "l", "c", "ra", "la", "ca"]:
+        direction = raw_input("Please choose r for remote, l for local or c for custom: ")
 
     """ Synchronize! """
-    if direction == "r":
+    if "r" in direction:
+      logger.info("Syncing remote changes to local folder.")
       album.syncFromRemote(troveboxClient)
-    elif direction == "l":
+    elif "l" in direction:
+      logger.info("Syncing local changes to remote album.")
       album.syncFromLocal(troveboxClient)
     else:
+      logger.info("Custom syncing.")
       album.syncCustom(troveboxClient)
 
 def goGoGadget():

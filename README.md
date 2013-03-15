@@ -18,7 +18,7 @@ Dependencies
 ------------
 
 * python-oauth2
-* [openphoto-python](https://github.com/photo/openphoto-python)
+* [openphoto-python](https://github.com/photo/openphoto-python) rev:925342072d
 * [poster](http://atlee.ca/software/poster/)
 
 Usage
