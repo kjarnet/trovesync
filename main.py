@@ -1,5 +1,6 @@
 # main.py
 
+import re
 from openphoto import OpenPhoto
 import json
 import hashlib
@@ -32,16 +33,21 @@ class Album:
       print "move local image ", fullfile, "to backup location", self.backupPath
       shutil.move(fullfile, self.backupPath)
     for i in self.remoteonly:
-      print "download image", i["filenameOriginal"]
-      respDownload = json.loads(client.download(i["pathDownload"], path.join(self.localpath, i["filenameOriginal"]), int(i["size"])*1024))
-      print "Response from GET " + i["pathDownload"] + ": " + respDownload["message"]
+      print "download image", i["filenameOriginal"], " from ", i["pathDownload"]
+      localFullfile = path.join(self.localpath, i["filenameOriginal"])
+      downloadPath = i["pathDownload"]
+      fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
+      print "fixed download path is", fixedDownloadPath 
+      respDownload = str(
+        client.download(fixedDownloadPath, localFullfile, int(i["size"])*1024))
+      print "Response from GET " + i["pathDownload"] + ": " + respDownload
 
   def syncFromLocal(self, client):
     for f in self.localonly:
       print "upload to remote", f
       fullfile = path.join(self.localpath, f)
       respUpload = json.loads(client.uploadPhoto(self.remoteId, fullfile))
-      print "Response from POST " + url + ":", respUpload["message"]
+      print "Response from POST " +  BetterClient.PHOTO_UPLOAD + ":", respUpload["message"]
 
     for i in self.remoteonly:
       print "tag remote image for deletion", i["filenameOriginal"]
@@ -110,8 +116,8 @@ class BetterClient:
   " First, build headers using oauth2 "
   def getOauthHeaders(self, url, method):
     parameters = None
-    consumer = oauth.Consumer(self.consumer_key, self.consumer_secret)
-    access_token = oauth.Token(self.token, self.token_secret)
+    consumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
+    access_token = oauth.Token(self.token, self.tokenSecret)
     sig_method = oauth.SignatureMethod_HMAC_SHA1()
 
     oauth_request = oauth.Request.from_consumer_and_token(
@@ -125,8 +131,10 @@ class BetterClient:
   """ Download file (copied from stackoverflow q. 22676) """
   def download(self, url, file_name, file_size):
     print "saving as", file_name
-    headers = getOauthHeaders(url, "GET")
-    u = urllib2.urlopen(urllib2.Request(url, headers=headers))
+    headers = self.getOauthHeaders(url, "GET")
+    requestObject = urllib2.Request(url, headers=headers)
+    print "made request", requestObject.get_full_url()
+    u = urllib2.urlopen(requestObject)
     with open(file_name, 'wb') as f:
       meta = u.info()
       print "Response from GET " + url + ":", meta
@@ -143,7 +151,7 @@ class BetterClient:
         status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
         status = status + chr(8)*(len(status)+1)
         print status
-      return meta
+    return meta
 
   def uploadPhoto(self, albumId, fileName):
     url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
