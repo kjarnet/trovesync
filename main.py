@@ -1,5 +1,6 @@
 # main.py
 
+import logging
 import re
 from openphoto import OpenPhoto
 import json
@@ -15,12 +16,16 @@ from poster import encode, streaminghttp
 
 __metaclass__ = type # make sure we use new-style classes
 
+APPNAME = "trovesync"
+
 class Picture:
   def __init__(self):
+    self.logger = logging.getLogger(APPNAME + ".Picture")
     self.localname = ""
 
 class Album:
   def __init__(self, localpath, remoteId, backupPath):
+    self.logger = logging.getLogger(APPNAME + ".Album")
     self.localonly = []
     self.remoteonly = []
     self.localpath = localpath
@@ -30,35 +35,35 @@ class Album:
   def syncFromRemote(self, client):
     for f in self.localonly:
       fullfile = path.join(self.localpath, f)
-      print "move local image ", fullfile, "to backup location", self.backupPath
+      self.logger.info("move local image "+ fullfile+ "to backup location"+ self.backupPath)
       shutil.move(fullfile, self.backupPath)
     for i in self.remoteonly:
-      print "download image", i["filenameOriginal"], " from ", i["pathDownload"]
+      self.logger.info("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
       localFullfile = path.join(self.localpath, i["filenameOriginal"])
       downloadPath = i["pathDownload"]
       fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
-      print "fixed download path is", fixedDownloadPath 
+      self.logger.info("fixed download path is"+ fixedDownloadPath)
       respDownload = str(
         client.download(fixedDownloadPath, localFullfile, int(i["size"])*1024))
-      print "Response from GET " + i["pathDownload"] + ": " + respDownload
+      self.logger.info("Response from GET " + i["pathDownload"] + ": " + respDownload)
 
   def syncFromLocal(self, client):
     for f in self.localonly:
-      print "upload to remote", f
+      self.logger.info("upload to remote"+ f)
       fullfile = path.join(self.localpath, f)
       respUpload = json.loads(client.uploadPhoto(self.remoteId, fullfile))
-      print "Response from POST " +  BetterClient.PHOTO_UPLOAD + ":", respUpload["message"]
+      self.logger.info("Response from POST " +  BetterClient.PHOTO_UPLOAD + ":"+ respUpload["message"])
 
     for i in self.remoteonly:
-      print "tag remote image for deletion", i["filenameOriginal"]
+      self.logger.info("tag remote image for deletion"+ i["filenameOriginal"])
       respTagPhoto = json.loads(client.softDeletePhoto(i["id"]))
-      print "Response from POST " + url + ":", respTagPhoto["message"]
+      self.logger.info("Response from POST " + url + ":"+ respTagPhoto["message"])
 
   def syncCustom(self, client):
     for f in self.localonly:
-      print "give user a choice: delete or upload", f
+      self.logger.info("give user a choice: delete or upload"+ f)
     for i in self.remoteonly:
-      print "give user a choice: delete or download", i["filenameOriginal"]
+      self.logger.info("give user a choice: delete or download"+ i["filenameOriginal"])
 
 class BetterClient:
   " A proxy to the OpenPhoto client with added methods for download and upload "
@@ -81,6 +86,7 @@ class BetterClient:
               tokenSecret,
               pageSize):
     " Constructor for proxy-client "
+    self.logger = logging.getLogger(APPNAME + ".BetterClient")
     self.hostName = hostName
     self.consumerKey = consumerKey
     self.consumerSecret = consumerSecret
@@ -95,7 +101,7 @@ class BetterClient:
     albmessage = albresp["message"]
     albcode = albresp["code"]
     remoteAlbums = albresp["result"]
-    print "Response from GET " + BetterClient.ALBUMS_LIST + ":", albmessage
+    self.logger.info("Response from GET " + BetterClient.ALBUMS_LIST + ":"+ albmessage)
     return remoteAlbums
 
   def getAlbumPhotos(self, albumId):
@@ -103,7 +109,7 @@ class BetterClient:
     imgmessage = imgresp["message"]
     imgcode = imgresp["code"]
     imgresult = imgresp["result"]
-    print "Response from GET " + BetterClient.PHOTOS_LIST + ":", imgmessage
+    self.logger.info("Response from GET " + BetterClient.PHOTOS_LIST + ":"+ imgmessage)
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
     return remoteImgs
 
@@ -130,15 +136,15 @@ class BetterClient:
 
   """ Download file (copied from stackoverflow q. 22676) """
   def download(self, url, file_name, file_size):
-    print "saving as", file_name
+    self.logger.info("saving as"+ file_name)
     headers = self.getOauthHeaders(url, "GET")
     requestObject = urllib2.Request(url, headers=headers)
-    print "made request", requestObject.get_full_url()
+    self.logger.info("made request"+ requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
     with open(file_name, 'wb') as f:
       meta = u.info()
-      print "Response from GET " + url + ":", meta
-      print "Downloading: %s Bytes: %s" % (file_name, file_size)
+      self.logger.info("Response from GET " + url + ":"+ meta)
+      self.logger.info("Downloading: %s Bytes: %s" % (file_name+ file_size))
 
       file_size_dl = 0
       block_sz = 8192
@@ -150,7 +156,7 @@ class BetterClient:
         f.write(buffer)
         status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
         status = status + chr(8)*(len(status)+1)
-        print status
+        self.logger.info(status)
     return meta
 
   def uploadPhoto(self, albumId, fileName):
@@ -161,21 +167,45 @@ class BetterClient:
     encparams = urllib.urlencode(parameters)
     urlWithParams = url + "?" + encparams
     streaminghttp.register_openers()
-    datagen, headers = encode.multipart_encode({"photo": open(file_name, "rb")})
-    headers.update(self.getOauthHeaders(urlWithParams, "POST"))
-    request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
+    with open(file_name, "rb") as localfile:
+      datagen, headers = encode.multipart_encode({"photo": localfile})
+      headers.update(self.getOauthHeaders(urlWithParams, "POST"))
+      request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
     response = request.read()
     return response
 
 
+def setup():
+  """ Setting up logging and reading credentials """
+  
+  " Logging (from http://docs.python.org/2/howto/logging-cookbook.html) "
+  # create logger 'trovesync'
+  logger = logging.getLogger(APPNAME)
+  logger.setLevel(logging.DEBUG)
+  # create file handler which logs from debug messages
+  fh = logging.FileHandler(APPNAME + ".log")
+  fh.setLevel(logging.INFO)
+  # create console handler with a higher log level
+  ch = logging.StreamHandler()
+  ch.setLevel(logging.DEBUG)
+  # create formatter and add it to the handlers
+  # formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+  # fh.setFormatter(formatter)
+  # ch.setFormatter(formatter)
+  # add the handlers to the logger
+  logger.addHandler(fh)
+  logger.addHandler(ch)
+  logger.info("Initialized logger")
 
-
-def sync():
-  """ Get Credentials """
+  " Credentials "
   with open("./cred.json") as credfile:
     cred = json.load(credfile)
-  print "cred.json: ", cred
+  logger.info("cred.json: "+ str(cred))
+  return cred
 
+def sync(cred):
+
+  logger = logging.getLogger(APPNAME)
   """ Initialize a webservice client """
   albumsPath = cred["albumsPath"]
   troveboxClient = BetterClient(
@@ -191,7 +221,7 @@ def sync():
   remoteAlbums = troveboxClient.getAlbums()
   albumMappings = cred["albums"]
   albums = []
-  print "Remote albums: " 
+  logger.info("Remote albums: " )
   for m in albumMappings:
     for a in remoteAlbums:
       found = False
@@ -204,30 +234,30 @@ def sync():
     if not found:
       remoteAlbumNames = [a["name"] for a in remoteAlbums]
       raise Exception("Found no remote album named " + m["remoteName"] +" in " + str(remoteAlbumNames))
-  print [a["name"] for a in remoteAlbums]
+  logger.info([a["name"] for a in remoteAlbums])
 
   for album in albums:
     """ Get list of remote images """
     remoteImgs = troveboxClient.getAlbumPhotos(album.remoteId)
-    print "Remote images:"
+    logger.info("Remote images:")
     for i in remoteImgs:
-      print "albums:", i["albums"], "/",  i["filenameOriginal"]
-      print "  ", i["hash"]
-    print "Count: ", len(remoteImgs)
+      logger.info("albums:"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
+      logger.info("  "+ i["hash"])
+    logger.info("Count: "+ str(len(remoteImgs)))
     if len(remoteImgs) >= troveboxClient.pageSize:
-      print ("Capped at " + troveboxClient.pageSize + " (maxPhotos option).")
+      logger.info(("Capped at " + troveboxClient.pageSize + " (maxPhotos option)."))
 
     """ Loop through local files and compare against remote images """
-    print "Local files:"
+    logger.info("Local files:")
     for f in listdir(album.localpath):
       fullfile = path.join(album.localpath, f)
       if not path.isfile(fullfile):
-        print "Skipping", fullfile, "(is not a file)."
+        logger.info("Skipping"+ fullfile+ "(is not a file).")
         continue
-      print fullfile
+      logger.info(fullfile)
       with open(fullfile, "rb") as imgFile:
         sha = hashlib.sha1(imgFile.read()).hexdigest()
-        print "  ", sha
+        logger.info("  "+ sha)
       found = False
       for i in remoteImgs:
         if i["hash"] == sha:
@@ -238,8 +268,8 @@ def sync():
         album.localonly.append(f)
     album.remoteonly = [i for i in remoteImgs if "inSync" not in i]
 
-    print "Local only: ", album.localonly
-    print "Remote only: ", [i["filenameOriginal"] for i in album.remoteonly]
+    logger.info("Local only: "+ str(album.localonly))
+    logger.info("Remote only: "+ str([i["filenameOriginal"] for i in album.remoteonly]))
 
     """ Choose sync direction """
     direction = raw_input("Do you want to sync [r]emote changes to local folder, [l]ocal changes to remote album or [c]hoose for each picture [r/l/c]? ")
@@ -254,8 +284,11 @@ def sync():
     else:
       album.syncCustom(troveboxClient)
 
+def goGoGadget():
+  cred = setup()
+  sync(cred)
 
-if __name__ == "__main__": sync()
+if __name__ == "__main__": goGoGadget()
 
   
 
