@@ -37,59 +37,66 @@ class Album:
   def syncFromRemote(self, client):
     for f in self.localonly:
       fullfile = path.join(self.localpath, f)
-      self.logger.info("move local image "+ fullfile+ "to backup location"+ self.backupPath)
+      self.logger.debug("move local image "+ fullfile + " to backup location "+ self.backupPath)
       shutil.move(fullfile, self.backupPath)
     for i in self.remoteonly:
-      self.logger.info("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
+      self.logger.debug("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
       localFullfile = path.join(self.localpath, i["filenameOriginal"])
       downloadPath = i["pathDownload"]
       fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
-      self.logger.info("fixed download path is"+ fixedDownloadPath)
+      if downloadPath != fixedDownloadPath:
+        self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
       respDownload = str(
         client.download(fixedDownloadPath, localFullfile, int(i["size"])*1024))
-      self.logger.info("Response from GET " + i["pathDownload"] + ": " + respDownload)
+      self.logger.debug("Response from GET " + i["pathDownload"] + ": " + respDownload)
 
   def syncFromLocal(self, client):
     for f in self.localonly:
-      self.logger.info("upload to remote"+ f)
+      self.logger.debug("upload to remote "+ f)
       fullfile = path.join(self.localpath, f)
-      respUpload = json.loads(client.uploadPhoto(self.remoteId, fullfile))
-      self.logger.info("Response from POST " +  BetterClient.PHOTO_UPLOAD + ":"+ respUpload["message"])
+      respRaw = client.uploadPhoto(self.remoteId, fullfile)
+      # respUpload = json.loads(respRaw)
+      respUpload = respRaw
+      self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ":"+ respUpload["message"])
 
     for i in self.remoteonly:
-      self.logger.info("tag remote image for deletion"+ i["filenameOriginal"])
-      respTagPhoto = json.loads(client.softDeletePhoto(i["id"]))
-      self.logger.info("Response from POST " + url + ":"+ respTagPhoto["message"])
+      self.logger.debug("tag remote image for deletion" + i["filenameOriginal"])
+      respRaw = client.softDeletePhoto(i["id"])
+      # respTagPhoto = json.loads(respRaw)
+      respTagPhoto = respRaw
+
+      self.logger.info("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
+      self.logger.info("Response from POST " + BetterClient.PHOTO_UPDATE + ": "+ respTagPhoto["message"])
 
   def syncCustom(self, client):
     for f in self.localonly:
-      self.logger.info("give user a choice: delete or upload"+ f)
+      self.logger.info("TODO: give user a choice: delete or upload"+ f)
     for i in self.remoteonly:
-      self.logger.info("give user a choice: delete or download"+ i["filenameOriginal"])
+      self.logger.info("TODO: give user a choice: delete or download"+ i["filenameOriginal"])
 
   def populatePhotos(self):
     " Get list of remote images "
     remoteImgs = self.wsClient.getAlbumPhotos(self.remoteId)
-    self.logger.info("Remote images:")
+    self.logger.debug("Remote images:")
     for i in remoteImgs:
-      self.logger.info("album(s):"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
-      self.logger.info("  "+ i["hash"])
-    self.logger.info("Count: "+ str(len(remoteImgs)))
+      self.logger.debug("album(s):"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
+      self.logger.debug("  "+ i["hash"])
+    self.logger.debug("Count: "+ str(len(remoteImgs)))
     if len(remoteImgs) >= self.wsClient.pageSize:
-      self.logger.info(("Capped at " + self.wsClient.pageSize + " (maxPhotos option)."))
+      self.logger.debug("Capped at " + self.wsClient.pageSize + " (maxPhotos option).")
 
     """ Loop through local files and compare against remote images,
         collecting local-onlies and marking common ones. """
-    self.logger.info("Local files:")
+    self.logger.debug("Local files:")
     for f in listdir(self.localpath):
       fullfile = path.join(self.localpath, f)
       if not path.isfile(fullfile):
-        self.logger.info("Skipping "+ fullfile+ " (not a file).")
+        self.logger.debug("Skipping "+ fullfile+ " (not a file).")
         continue
-      self.logger.info(fullfile)
+      self.logger.debug(fullfile)
       with open(fullfile, "rb") as imgFile:
         sha = hashlib.sha1(imgFile.read()).hexdigest()
-        self.logger.info("  "+ sha)
+        self.logger.debug("  "+ sha)
       found = False
       for i in remoteImgs:
         if i["hash"] == sha:
@@ -140,7 +147,7 @@ class BetterClient:
     albmessage = albresp["message"]
     albcode = albresp["code"]
     remoteAlbums = albresp["result"]
-    self.logger.info("Response from GET " + BetterClient.ALBUMS_LIST + ":"+ albmessage)
+    self.logger.debug("Response from GET " + BetterClient.ALBUMS_LIST + ":"+ albmessage)
     return remoteAlbums
 
   def getAlbumPhotos(self, albumId):
@@ -150,13 +157,13 @@ class BetterClient:
     imgmessage = imgresp["message"]
     imgcode = imgresp["code"]
     imgresult = imgresp["result"]
-    self.logger.info("Response from GET " + BetterClient.PHOTOS_LIST + ":"+ imgmessage)
+    self.logger.debug("Response from GET " + BetterClient.PHOTOS_LIST + ":"+ imgmessage)
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
     return remoteImgs
 
   def softDeletePhoto(self, photoId):
     url = BetterClient.PHOTO_UPDATE % photoId
-    respTagPhoto = self.opClient.post(url, {"tagsAdd": DELETE_TAG})
+    respTagPhoto = self.opClient.post(url, tagsAdd = [BetterClient.DELETE_TAG])
     return respTagPhoto
 
 
@@ -177,14 +184,14 @@ class BetterClient:
 
   def download(self, url, file_name, file_size):
     """ Download file (copied from stackoverflow q. 22676) """
-    self.logger.debug("saving as"+ file_name)
+    self.logger.debug("saving as" + file_name)
     headers = self.getOauthHeaders(url, "GET")
     requestObject = urllib2.Request(url, headers=headers)
     self.logger.debug("made request"+ requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
     with open(file_name, 'wb') as f:
       meta = u.info()
-      self.logger.debug("Response from GET " + url + ":"+ meta)
+      self.logger.debug("##### Response from GET " + url + ":"+ str(meta))
       self.logger.info("Downloading: %s Bytes: %s" % (file_name, file_size))
 
       file_size_dl = 0
@@ -198,7 +205,7 @@ class BetterClient:
         status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
         status = status + chr(8)*(len(status)+1)
         self.logger.info(status)
-    return meta
+    return str(meta)
 
   def uploadPhoto(self, albumId, fileName):
     url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
@@ -214,7 +221,7 @@ class BetterClient:
       headers.update(self.getOauthHeaders(urlWithParams, "POST"))
       request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
     response = request.read()
-    return response
+    return json.loads(response)
 
 
 def setup():
@@ -291,7 +298,7 @@ def sync(cred):
       syncQuestion = "Do you want to sync " +\
         "[r]emote changes to local folder, " +\
         "[l]ocal changes to remote album or " +\
-        "[c]hoose for each picture [r/l/c]? " +\
+        "[c]hoose action for each picture [r/l/c]? " +\
         "\n  (add \"a\" to apply to all albums, " +\
         "i.e. [ra/la/ca])"
       direction = raw_input(syncQuestion)

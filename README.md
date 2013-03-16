@@ -24,35 +24,41 @@ Dependencies
 Usage
 -----
 
-1. Get your OAuth credentials from Site Settings 
+1. Install dependencies listed above.
+2. Get your OAuth credentials from Site Settings 
 on your Trovebox site 
 by creating a new app.
-2. Copy sample.cred.json to cred.json
+3. Copy sample.cred.json to cred.json
 and replace with your credentials
 and path to the folder
-holding your local copy of the album.
-3. Run `python main.py`.
-4. When prompted,
-choose the remote album
-to sync with your local folder
-by entering it's numeric id.
-5. You now get three choices:
-   1. "Sync from Trovebox":
+holding your local copy of the album(s).
+4. In cred.json,
+replace the "albums" list
+with pairs of local folder-name
+(under the albumsPath)
+and remote album-name.
+5. Run `python main.py`.
+6. This will loop through your albums
+giving you three choices for each 
+(you can also add "a" to your choice
+to apply it to all subsequent albums):
+   1. "Sync remote changes to local folder" (r):
    Choose this to make your local folder
    an exact copy of the Trovebox album.
    For each file in the localonly folder
-   the corresponding file in your local folder will be deleted.
+   the corresponding file in your local folder
+   will be moved to the backup-folder.
    For each file in the remoteonly folder
    the corresponding file will be downloaded from Trovebox
    to your local folder.
-   2. "Sync to Trovebox":
+   2. "Sync local changes to remote album" (l):
    This will make the Trovebox album
    an exact copy of your local folder.
    Each file in the localonly folder
    will be uploaded to the Trovebox album.
    For each file in the remoteonly folder
-   the corresponding file will be deleted from Trovebox.
-   3. "Manual" (not yet implemented):
+   the corresponding file will be tagged for deletion on Trovebox.
+   3. "Choose action for each picture" _(not yet implemented)_:
    This will go through each file in both folders
    and prompt you to choose whether to
    upload the file to Trovebox,
@@ -82,8 +88,18 @@ There are two ways to work around this problem
 _before_ uploading to Trovebox.
 2. Ask Trovebox support kindly to disable exiftran for your account.
 
+Another issue is related to local backup of deleted pictures:
+If you don't have a folder with the name you chose for you backup folders
+inside each of your local album folders,
+deleted photos will instead be renamed
+and you'll loose all deleted photos but the last!
+
 Change history
 --------------
+#### Version 0.2
+- Cleaned up code, splitting it into classes.
+- Synchronizing several albums (set up in cred.json)
+
 #### Version 0.1
 - First working version with basic functionality
 - Synchronize single local folder with single (existing) remote album.
