@@ -46,9 +46,10 @@ class Album:
       fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
       if downloadPath != fixedDownloadPath:
         self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
-      respDownload = str(
-        client.download(fixedDownloadPath, localFullfile, int(i["size"])*1024))
-      self.logger.debug("Response from GET " + i["pathDownload"] + ": " + respDownload)
+      respDownload = client.download(
+          fixedDownloadPath, localFullfile, int(i["size"])*1024)
+      dbgMsg = "Response from GET " + i["pathDownload"] + ": " + respDownload.info
+      self.logger.debug(dbgMsg)
 
   def syncFromLocal(self, client):
     for f in self.localonly:
@@ -56,28 +57,18 @@ class Album:
       fullfile = path.join(self.localpath, f)
       respRaw = client.uploadPhoto(self.remoteId, fullfile)
       # respUpload = json.loads(respRaw)
-      respUpload = respRaw
-      try:
-        self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ": "+ respUpload["message"])
-      except TypeError, e:
-        msg = "ERROR: response from client.uploadPhoto(self.remoteId, fullfile)"+\
-          " is not a dict: " + str(respUpload)
-        self.logger.error(msg)
-        raise
+      respUpload = respRaw.info
+      self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ": "+ respUpload["message"])
 
     for i in self.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
       respRaw = client.softDeletePhoto(i["id"])
       # respTagPhoto = json.loads(respRaw)
-      respTagPhoto = respRaw
-      try:
-        self.logger.debug("Response from POST " + BetterClient.PHOTO_UPDATE + ": "+ respTagPhoto["message"])
-        self.logger.debug("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
-      except TypeError, e:
-        msg = "ERROR: response from client.softDeletePhoto(i[\"id\"])" +\
-          " is not a dict: " + str(respTagPhoto)
-        self.logger.error(msg)
-        raise
+      respTagPhoto = respRaw.info
+      dbgMsg = "Response from POST " + BetterClient.PHOTO_UPDATE + ": "+\
+        respTagPhoto["message"]
+      self.logger.debug(dbgMsg)
+      self.logger.debug("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
 
   def syncCustom(self, client):
     for f in self.localonly:
@@ -120,6 +111,45 @@ class Album:
     " Add not-marked remotes to remoteonly. "
     self.remoteonly = [i for i in remoteImgs if "inSync" not in i]
 
+class BetterResponse:
+  """ A wrapper for the response from webservice calls,
+  to unify output and handle errors """
+
+  def __init__(self):
+    self.logger = logging.getLogger(APPNAME + ".BetterResponse")
+    self.errors = []
+    self.info = ""
+    self.data = None
+
+  @classmethod
+  def fromString(cls, response):
+    newObj = cls()
+    newObj.info = response
+    return newObj
+
+  @classmethod
+  def fromDict(cls, response):
+    newObj = cls()
+    try:
+      newObj.info = str(response["code"]) + ": " + response["message"]
+      newObj.data = response["result"]
+    except TypeError, e:
+      msg = "ERROR: response is not a dict: " + str(response)
+      newObj.logger.error(msg)
+      raise
+    return newObj
+
+  @classmethod
+  def fromMimeMsg(cls, response):
+    newObj = cls()
+    newObj.info = str(response)
+    return newObj
+
+  @classmethod
+  def fromJson(cls, response):
+    dictResponse = json.loads(response)
+    return cls.fromDict(dictResponse)
+    
 class BetterClient:
   " A proxy to the OpenPhoto client with added methods for download and upload "
 
@@ -153,43 +183,29 @@ class BetterClient:
   
   def getAlbums(self):
     rawresp = self.opClient.get(BetterClient.ALBUMS_LIST)
-    #albresp = json.loads(rawresp) 
-    albresp = rawresp #newer op-lib returns ready-parsed response
-    try:
-      albmessage = albresp["message"]
-      albcode = albresp["code"]
-      remoteAlbums = albresp["result"]
-      self.logger.debug("Response from GET " + BetterClient.ALBUMS_LIST + ": "+ albmessage)
-    except TypeError, e:
-      msg = "ERROR: response from opClient.get(BetterClient.ALBUMS_LIST)"+\
-        " is not a dict: " +\
-        str(albresp)
-      self.logger.error(msg)
-      raise
+    #albresp = json.loads(rawresp) # newer op-lib returns ready-parsed response
+    albresp = BetterResponse.fromDict(rawresp)
+    albmessage = albresp.info
+    remoteAlbums = albresp.data
+    debugMsg = "Response from GET " + BetterClient.ALBUMS_LIST + ": "+ albmessage
+    self.logger.debug(debugMsg)
     return remoteAlbums
 
   def getAlbumPhotos(self, albumId):
     rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
-    #imgresp = json.loads(rawresp)
-    imgresp = rawresp #newer op-lib returns ready-parsed response
-    try:
-      imgmessage = imgresp["message"]
-      imgcode = imgresp["code"]
-      imgresult = imgresp["result"]
-      self.logger.debug("Response from GET " + BetterClient.PHOTOS_LIST + ": "+ imgmessage)
-    except TypeError, e:
-      msg = "ERROR: response from opClient.get(BetterClient.PHOTOS_LIST...)"+\
-        " is not a dict: " +\
-        str(imgresp)
-      self.logger.error(msg)
-      raise
+    #imgresp = json.loads(rawresp) #newer op-lib returns ready-parsed response
+    imgresp = BetterResponse.fromDict(rawresp)
+    imgmessage = imgresp.info
+    imgresult = imgresp.data
+    debugMsg = "Response from GET " + BetterClient.PHOTOS_LIST + ": "+ imgmessage
+    self.logger.debug(debugMsg)
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
     return remoteImgs
 
   def softDeletePhoto(self, photoId):
     url = BetterClient.PHOTO_UPDATE % photoId
     respTagPhoto = self.opClient.post(url, tagsAdd = [BetterClient.DELETE_TAG])
-    return respTagPhoto
+    return BetterResponse.fromString(respTagPhoto)
 
 
   def getOauthHeaders(self, url, method):
@@ -200,36 +216,36 @@ class BetterClient:
     sig_method = oauth.SignatureMethod_HMAC_SHA1()
 
     oauth_request = oauth.Request.from_consumer_and_token(
-            consumer, token=access_token, http_method=method, http_url=url, parameters=parameters
+            consumer, token=access_token, http_method=method, 
+            http_url=url, parameters=parameters
         )
     oauth_request.sign_request(sig_method, consumer, access_token)
     headers = oauth_request.to_header()
     headers['User-Agent'] = 'Trovesync'
     return headers
 
-  def download(self, url, file_name, file_size):
+  def download(self, url, filename, filesize):
     """ Download file (copied from stackoverflow q. 22676) """
-    self.logger.debug("saving as" + file_name)
+    self.logger.debug("saving as" + filename)
     headers = self.getOauthHeaders(url, "GET")
     requestObject = urllib2.Request(url, headers=headers)
     self.logger.debug("made request"+ requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
-    with open(file_name, 'wb') as f:
-      meta = u.info()
-      self.logger.info("Downloading: %s Bytes: %s" % (file_name, file_size))
-
-      file_size_dl = 0
-      block_sz = 8192
+    meta = u.info()
+    self.logger.info("Downloading: %s Bytes: %s" % (filename, filesize))
+    filesizeDown = 0
+    blocksize = 8192
+    with open(filename, 'wb') as f:
       while True:
-        buffer = u.read(block_sz)
+        buffer = u.read(blocksize)
         if not buffer:
           break
-        file_size_dl += len(buffer)
+        filesizeDown += len(buffer)
         f.write(buffer)
-        status = r"%10d  [%3.2f%%]" % (file_size_dl, file_size_dl * 100. / file_size)
+        status = r"%10d  [%3.2f%%]" % (filesizeDown, filesizeDown * 100. / filesize)
         status = status + chr(8)*(len(status)+1)
         self.logger.info(status)
-    return str(meta)
+    return BetterResponse.fromMimeMsg(meta)
 
   def uploadPhoto(self, albumId, fileName):
     url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
@@ -245,7 +261,7 @@ class BetterClient:
       headers.update(self.getOauthHeaders(urlWithParams, "POST"))
       request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
     response = request.read()
-    return json.loads(response)
+    return BetterResponse.fromJson(response)
 
 
 def setup():
