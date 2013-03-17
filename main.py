@@ -57,16 +57,27 @@ class Album:
       respRaw = client.uploadPhoto(self.remoteId, fullfile)
       # respUpload = json.loads(respRaw)
       respUpload = respRaw
-      self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ":"+ respUpload["message"])
+      try:
+        self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ": "+ respUpload["message"])
+      except TypeError, e:
+        msg = "ERROR: response from client.uploadPhoto(self.remoteId, fullfile)"+\
+          " is not a dict: " + str(respUpload)
+        self.logger.error(msg)
+        raise
 
     for i in self.remoteonly:
-      self.logger.debug("tag remote image for deletion" + i["filenameOriginal"])
+      self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
       respRaw = client.softDeletePhoto(i["id"])
       # respTagPhoto = json.loads(respRaw)
       respTagPhoto = respRaw
-
-      self.logger.info("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
-      self.logger.info("Response from POST " + BetterClient.PHOTO_UPDATE + ": "+ respTagPhoto["message"])
+      try:
+        self.logger.debug("Response from POST " + BetterClient.PHOTO_UPDATE + ": "+ respTagPhoto["message"])
+        self.logger.debug("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
+      except TypeError, e:
+        msg = "ERROR: response from client.softDeletePhoto(i[\"id\"])" +\
+          " is not a dict: " + str(respTagPhoto)
+        self.logger.error(msg)
+        raise
 
   def syncCustom(self, client):
     for f in self.localonly:
@@ -144,20 +155,34 @@ class BetterClient:
     rawresp = self.opClient.get(BetterClient.ALBUMS_LIST)
     #albresp = json.loads(rawresp) 
     albresp = rawresp #newer op-lib returns ready-parsed response
-    albmessage = albresp["message"]
-    albcode = albresp["code"]
-    remoteAlbums = albresp["result"]
-    self.logger.debug("Response from GET " + BetterClient.ALBUMS_LIST + ":"+ albmessage)
+    try:
+      albmessage = albresp["message"]
+      albcode = albresp["code"]
+      remoteAlbums = albresp["result"]
+      self.logger.debug("Response from GET " + BetterClient.ALBUMS_LIST + ": "+ albmessage)
+    except TypeError, e:
+      msg = "ERROR: response from opClient.get(BetterClient.ALBUMS_LIST)"+\
+        " is not a dict: " +\
+        str(albresp)
+      self.logger.error(msg)
+      raise
     return remoteAlbums
 
   def getAlbumPhotos(self, albumId):
     rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
     #imgresp = json.loads(rawresp)
     imgresp = rawresp #newer op-lib returns ready-parsed response
-    imgmessage = imgresp["message"]
-    imgcode = imgresp["code"]
-    imgresult = imgresp["result"]
-    self.logger.debug("Response from GET " + BetterClient.PHOTOS_LIST + ":"+ imgmessage)
+    try:
+      imgmessage = imgresp["message"]
+      imgcode = imgresp["code"]
+      imgresult = imgresp["result"]
+      self.logger.debug("Response from GET " + BetterClient.PHOTOS_LIST + ": "+ imgmessage)
+    except TypeError, e:
+      msg = "ERROR: response from opClient.get(BetterClient.PHOTOS_LIST...)"+\
+        " is not a dict: " +\
+        str(imgresp)
+      self.logger.error(msg)
+      raise
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
     return remoteImgs
 
@@ -191,7 +216,6 @@ class BetterClient:
     u = urllib2.urlopen(requestObject)
     with open(file_name, 'wb') as f:
       meta = u.info()
-      self.logger.debug("##### Response from GET " + url + ":"+ str(meta))
       self.logger.info("Downloading: %s Bytes: %s" % (file_name, file_size))
 
       file_size_dl = 0
