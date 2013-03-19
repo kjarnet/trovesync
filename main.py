@@ -5,7 +5,7 @@ import re
 from openphoto import OpenPhoto
 import json
 import hashlib
-from os import listdir, path
+from os import makedirs, listdir, path, walk
 import shutil
 import urllib2
 import urllib
@@ -24,21 +24,41 @@ class Picture:
     self.localname = ""
 
 class Album:
-  def __init__(self, localpath, remoteId, backupPath, wsClient):
+  """ Class to hold state of album-synchronization """
+
+  " Constants "
+  PHOTO_FILEPATTERN = ".*\\.jpg$"
+
+  def __init__(self, localpath, remoteId, backupDir, wsClient):
     self.logger = logging.getLogger(APPNAME + ".Album")
     self.localpath = localpath
     self.remoteId = remoteId
-    self.backupPath = backupPath
+    self.backupDir = backupDir
     self.wsClient = wsClient
     self.localonly = []
     self.remoteonly = []
     self.populatePhotos()
+    self.prepare()
+
+  def prepare(self):
+    """ Preparations needing to be made (typically called by __init__) """
+    if(not path.isdir(self.localpath)):
+      raise Exception
+
+    backupPath = path.join(self.localpath, self.backupDir)
+    if(not path.isdir(backupPath)):
+      self.logger.debug("Creating backup-folder: " + backupPath)
+      makedirs(backupPath)
+
+
+
 
   def syncFromRemote(self, client):
     for f in self.localonly:
       fullfile = path.join(self.localpath, f)
-      self.logger.debug("move local image "+ fullfile + " to backup location "+ self.backupPath)
-      shutil.move(fullfile, self.backupPath)
+      backupPath = path.join(self.localpath, self.backupDir)
+      self.logger.debug("move local image "+ fullfile + " to backup location "+ backupPath)
+      shutil.move(fullfile, backupPath)
     for i in self.remoteonly:
       self.logger.debug("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
       localFullfile = path.join(self.localpath, i["filenameOriginal"])
@@ -92,23 +112,26 @@ class Album:
     """ Loop through local files and compare against remote images,
         collecting local-onlies and marking common ones. """
     self.logger.debug("Local files:")
-    for f in listdir(self.localpath):
-      fullfile = path.join(self.localpath, f)
-      if not path.isfile(fullfile):
-        self.logger.debug("Skipping "+ fullfile+ " (not a file).")
-        continue
-      self.logger.debug(fullfile)
-      with open(fullfile, "rb") as imgFile:
-        sha = hashlib.sha1(imgFile.read()).hexdigest()
-        self.logger.debug("  "+ sha)
-      found = False
-      for i in remoteImgs:
-        if i["hash"] == sha:
-          i["inSync"] = True
-          found = True
-          break
-      if not found:
-        self.localonly.append(f)
+    rePhotoPattern = re.compile(Album.PHOTO_FILEPATTERN, re.IGNORECASE)
+    reDirPattern = re.compile(Album.PHOTO_FILEPATTERN, re.IGNORECASE)
+    absLocalPath = path.abspath(self.localpath)
+    for currentPath, subFolders, files in walk(absLocalPath):
+      if '.svn' in subFolders:
+        subFolders.remove('.svn')
+      relativePath = path.relpath(currentPath, absLocalPath)
+      photoFiles = filter(rePhotoPattern.search, files)
+      for filename in photoFiles:
+        fullfile = path.join(currentPath, filename)
+        self.logger.debug(fullfile)
+        with open(fullfile, "rb") as imgFile:
+          sha = hashlib.sha1(imgFile.read()).hexdigest()
+          self.logger.debug("  "+ sha)
+        for i in remoteImgs:
+          if i["hash"] == sha:
+            i["inSync"] = True
+            break
+        else: # for-else executes when for-loop terminates normally (not by break)
+          self.localonly.append(path.join(relativePath, filename))
 
     " Add not-marked remotes to remoteonly. "
     self.remoteonly = [i for i in remoteImgs if "inSync" not in i]
@@ -155,13 +178,13 @@ class BetterResponse:
 class BetterClient:
   " A proxy to the OpenPhoto client with added methods for download and upload "
 
-  # Trovebox service endpoints:
+  " Trovebox service endpoints: "
   ALBUMS_LIST = "/albums/list.json"
   PHOTOS_LIST = "/photos/list.json"
   PHOTO_UPLOAD = "/photo/upload.json"
   PHOTO_UPDATE = "/photo/%s/update.json"
 
-  # Other constants:
+  " Other constants: "
   DELETE_TAG = "trovesyncDelete"
 
   def __init__(
@@ -320,9 +343,8 @@ def sync(cred):
       found = False
       if m["remoteName"] == a["name"]:
         localpath = path.join(albumsPath, m["localName"])
-        backupPath = path.join(localpath, cred["backupDirName"])
         albums.append((
-          Album(localpath, a["id"], backupPath, troveboxClient), 
+          Album(localpath, a["id"], cred["backupDirName"], troveboxClient), 
           a["name"]))
         found = True
         break
