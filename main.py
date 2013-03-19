@@ -58,7 +58,9 @@ class Album:
       respRaw = client.uploadPhoto(self.remoteId, fullfile)
       # respUpload = json.loads(respRaw)
       respUpload = respRaw.info
-      self.logger.debug("Response from POST " +  BetterClient.PHOTO_UPLOAD + ": "+ respUpload["message"])
+      dbgMsg = "Response from POST " +\
+        BetterClient.PHOTO_UPLOAD + ": "+ respUpload
+      self.logger.debug(dbgMsg)
 
     for i in self.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
@@ -66,7 +68,7 @@ class Album:
       # respTagPhoto = json.loads(respRaw)
       respTagPhoto = respRaw.info
       dbgMsg = "Response from POST " + BetterClient.PHOTO_UPDATE + ": "+\
-        respTagPhoto["message"]
+        respTagPhoto
       self.logger.debug(dbgMsg)
       self.logger.debug("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
 
@@ -205,7 +207,7 @@ class BetterClient:
   def softDeletePhoto(self, photoId):
     url = BetterClient.PHOTO_UPDATE % photoId
     respTagPhoto = self.opClient.post(url, tagsAdd = [BetterClient.DELETE_TAG])
-    return BetterResponse.fromString(respTagPhoto)
+    return BetterResponse.fromDict(respTagPhoto)
 
 
   def getOauthHeaders(self, url, method):
@@ -338,9 +340,9 @@ def sync(cred):
       syncQuestion = "Do you want to sync " +\
         "[r]emote changes to local folder, " +\
         "[l]ocal changes to remote album or " +\
-        "[c]hoose action for each picture [r/l/c]? " +\
+        "[c]hoose action for each picture [r/l/c]" +\
         "\n  (add \"a\" to apply to all albums, " +\
-        "i.e. [ra/la/ca])"
+        "i.e. [ra/la/ca])? "
       direction = raw_input(syncQuestion)
       while direction not in ["r", "l", "c", "ra", "la", "ca"]:
         direction = raw_input("Please choose r for remote, l for local or c for custom: ")
