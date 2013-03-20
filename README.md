@@ -2,6 +2,9 @@ TroveSync
 =========
 
 Application for synchronizing a local folder with a trovebox.com album.
+**NB: This is to be considered pre-alpha software
+and may very well delete your photos locally and/or remotely!
+Please do not use without a safe bacup of all your photos!**
 
 Current status
 --------------
@@ -88,14 +91,12 @@ There are two ways to work around this problem
 _before_ uploading to Trovebox.
 2. Ask Trovebox support kindly to disable exiftran for your account.
 
-Another issue is related to local backup of deleted pictures:
-If you don't have a folder with the name you chose for you backup folders
-inside each of your local album folders,
-deleted photos will instead be renamed
-and you'll loose all deleted photos but the last!
-
 Change history
 --------------
+#### Version 0.3
+- Local folders are now scanned recursively for \*.jpg-files.
+- Logging is improved and is now also outputted to a file.
+
 #### Version 0.2
 - Cleaned up code, splitting it into classes.
 - Synchronizing several albums (set up in cred.json)
