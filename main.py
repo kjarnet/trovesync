@@ -1,5 +1,6 @@
 # main.py
 
+import sys
 import logging
 import re
 from openphoto import OpenPhoto
@@ -29,29 +30,33 @@ class Album:
   " Constants "
   PHOTO_FILEPATTERN = ".*\\.jpg$"
 
-  def __init__(self, localpath, remoteId, backupDir, wsClient):
+  def __init__(self, localpath, remoteId, remoteName, backupDir, wsClient):
     self.logger = logging.getLogger(APPNAME + ".Album")
     self.localpath = localpath
     self.remoteId = remoteId
+    self.remoteName = remoteName
     self.backupDir = backupDir
     self.wsClient = wsClient
     self.localonly = []
     self.remoteonly = []
     self.populatePhotos()
-    self.prepare()
+    self.prepare_local()
+    self.prepare_remote()
 
-  def prepare(self):
-    """ Preparations needing to be made (typically called by __init__) """
+  def prepare_local(self):
+    """ Preparations needing to be made to local folders
+        (typically called by __init__) """
     if(not path.isdir(self.localpath)):
       raise Exception
-
     backupPath = path.join(self.localpath, self.backupDir)
     if(not path.isdir(backupPath)):
       self.logger.debug("Creating backup-folder: " + backupPath)
       makedirs(backupPath)
 
-
-
+  def prepare_remote(self):
+    """ Preparations needing to be made to remote album
+        (typically called by __init__) """
+    resp = self.wsClient.createAlbum(self.remoteName)
 
   def syncFromRemote(self, client):
     for f in self.localonly:
@@ -113,11 +118,10 @@ class Album:
         collecting local-onlies and marking common ones. """
     self.logger.debug("Local files:")
     rePhotoPattern = re.compile(Album.PHOTO_FILEPATTERN, re.IGNORECASE)
-    reDirPattern = re.compile(Album.PHOTO_FILEPATTERN, re.IGNORECASE)
     absLocalPath = path.abspath(self.localpath)
     for currentPath, subFolders, files in walk(absLocalPath):
-      if '.svn' in subFolders:
-        subFolders.remove('.svn')
+      if self.backupDir in subFolders:
+        subFolders.remove(self.backupDir)
       relativePath = path.relpath(currentPath, absLocalPath)
       photoFiles = filter(rePhotoPattern.search, files)
       for filename in photoFiles:
@@ -180,6 +184,7 @@ class BetterClient:
 
   " Trovebox service endpoints: "
   ALBUMS_LIST = "/albums/list.json"
+  ALBUM_CREATE = "/album/create.json"
   PHOTOS_LIST = "/photos/list.json"
   PHOTO_UPLOAD = "/photo/upload.json"
   PHOTO_UPDATE = "/photo/%s/update.json"
@@ -210,11 +215,20 @@ class BetterClient:
     rawresp = self.opClient.get(BetterClient.ALBUMS_LIST)
     #albresp = json.loads(rawresp) # newer op-lib returns ready-parsed response
     albresp = BetterResponse.fromDict(rawresp)
-    albmessage = albresp.info
     remoteAlbums = albresp.data
-    debugMsg = "Response from GET " + BetterClient.ALBUMS_LIST + ": "+ albmessage
+    debugMsg = "Response from GET %s: %s" % (
+      BetterClient.ALBUMS_LIST, albresp.info)
     self.logger.debug(debugMsg)
     return remoteAlbums
+
+  def createAlbum(self, name):
+    rawresp = self.opClient.post(BetterClient.ALBUM_CREATE, name=name)
+    albresp = BetterResponse.fromDict(rawresp)
+    debugMsg = "Response from POST %s: %s" % (
+      BetterClient.ALBUMS_LIST, albresp.info)
+    self.logger.debug(debugMsg)
+    return albresp.data["id"]
+
 
   def getAlbumPhotos(self, albumId):
     rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
@@ -222,7 +236,8 @@ class BetterClient:
     imgresp = BetterResponse.fromDict(rawresp)
     imgmessage = imgresp.info
     imgresult = imgresp.data
-    debugMsg = "Response from GET " + BetterClient.PHOTOS_LIST + ": "+ imgmessage
+    debugMsg = "Response from GET %s: %s" % (
+      BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
     return remoteImgs
@@ -288,6 +303,14 @@ class BetterClient:
     response = request.read()
     return BetterResponse.fromJson(response)
 
+def ask(question, accept):
+  """ Ask the user a question and accept an array of answers. 
+      Answer is returned. """
+  answer = raw_input(question + " " + str(accept))
+  while answer not in accept:
+    answer = raw_input("  Please choose one of: %s" % str(accept))
+  return answer
+  
 
 def setup():
   """ Setting up logging and reading credentials """
@@ -339,23 +362,32 @@ def sync(cred):
   albums = []
   logger.info("Remote albums: " )
   for m in albumMappings:
+    remoteId = None
+    remoteName = m["remoteName"]
     for a in remoteAlbums:
-      found = False
-      if m["remoteName"] == a["name"]:
-        localpath = path.join(albumsPath, m["localName"])
-        albums.append((
-          Album(localpath, a["id"], cred["backupDirName"], troveboxClient), 
-          a["name"]))
-        found = True
+      if remoteName == a["name"]:
+        remoteId = a["id"]
         break
-    if not found:
-      raise Exception("Found no remote album named " + m["remoteName"] +" in " + str(remoteAlbumNames))
+    else: # looped through remote albums without finding m.
+      logger.info("Album '%s' doesn't exist on the remote." % remoteName)
+      doCreate = ask("Do you want to create it?", ["y","n"])
+      if doCreate != "y":
+        logger.error("Missing remote album '%s' - can not continue!" % remoteName)
+        sys.exit(1)
+      else:
+        localpath = path.join(albumsPath, m["localName"])
+        albums.append(
+          Album(localpath, remoteId, remoteName, 
+            cred["backupDirName"], troveboxClient), 
+          )
 
   direction = ""
-  for album, name in albums:
-    logger.info("Syncing album " + name + " against folder " + album.localpath)
+  for album in albums:
+    remoteOnlyNames = [i["filenameOriginal"] for i in album.remoteonly]
+    logger.info("Syncing album %s against folder %s." % (
+      album.remoteName, album.localpath))
     logger.info("Local only: "+ str(album.localonly))
-    logger.info("Remote only: "+ str([i["filenameOriginal"] for i in album.remoteonly]))
+    logger.info("Remote only: "+ str(remoteOnlyNames))
 
     if "a" not in direction:
       """ Choose sync direction """
@@ -365,9 +397,7 @@ def sync(cred):
         "[c]hoose action for each picture [r/l/c]" +\
         "\n  (add \"a\" to apply to all albums, " +\
         "i.e. [ra/la/ca])? "
-      direction = raw_input(syncQuestion)
-      while direction not in ["r", "l", "c", "ra", "la", "ca"]:
-        direction = raw_input("Please choose r for remote, l for local or c for custom: ")
+      direction = ask(syncQuestion, ["r", "l", "c", "ra", "la", "ca"])
 
     """ Synchronize! """
     if "r" in direction:
