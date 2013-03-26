@@ -361,6 +361,7 @@ def sync(cred):
   albumMappings = cred["albums"]
   albums = []
   logger.info("Remote albums: " )
+  doCreate = ""
   for m in albumMappings:
     remoteId = None
     remoteName = m["remoteName"]
@@ -370,16 +371,16 @@ def sync(cred):
         break
     else: # looped through remote albums without finding m.
       logger.info("Album '%s' doesn't exist on the remote." % remoteName)
-      doCreate = ask("Do you want to create it?", ["y","n"])
-      if doCreate != "y":
+      if "a" not in doCreate:
+        doCreate = ask("Do you want to create it?", ["y","n", "ya"])
+      if "y" not in doCreate:
         logger.error("Missing remote album '%s' - can not continue!" % remoteName)
         sys.exit(1)
-      else:
-        localpath = path.join(albumsPath, m["localName"])
-        albums.append(
-          Album(localpath, remoteId, remoteName, 
-            cred["backupDirName"], troveboxClient), 
-          )
+    localpath = path.join(albumsPath, m["localName"])
+    albums.append(
+      Album(localpath, remoteId, remoteName, 
+        cred["backupDirName"], troveboxClient), 
+      )
 
   direction = ""
   for album in albums:
