@@ -40,10 +40,10 @@ class Album:
     self.localonly = []
     self.remoteonly = []
     self.populatePhotos()
-    self.prepare_local()
-    self.prepare_remote()
+    self.prepareLocal()
+    self.prepareRemote()
 
-  def prepare_local(self):
+  def prepareLocal(self):
     """ Preparations needing to be made to local folders
         (typically called by __init__) """
     if(not path.isdir(self.localpath)):
@@ -53,10 +53,12 @@ class Album:
       self.logger.debug("Creating backup-folder: " + backupPath)
       makedirs(backupPath)
 
-  def prepare_remote(self):
+  def prepareRemote(self):
     """ Preparations needing to be made to remote album
         (typically called by __init__) """
-    resp = self.wsClient.createAlbum(self.remoteName)
+    if self.remoteId is None:
+      resp = self.wsClient.createAlbum(self.remoteName)
+      self.remoteId = resp.data["id"]
 
   def syncFromRemote(self, client):
     for f in self.localonly:
@@ -73,7 +75,8 @@ class Album:
         self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
       respDownload = client.download(
           fixedDownloadPath, localFullfile, int(i["size"])*1024)
-      dbgMsg = "Response from GET " + i["pathDownload"] + ": " + respDownload.info
+      dbgMsg = "Response from GET %s: %s" % (
+            i["pathDownload"], respDownload.getInfoStr())
       self.logger.debug(dbgMsg)
 
   def syncFromLocal(self, client):
@@ -82,37 +85,40 @@ class Album:
       fullfile = path.join(self.localpath, f)
       respRaw = client.uploadPhoto(self.remoteId, fullfile)
       # respUpload = json.loads(respRaw)
-      respUpload = respRaw.info
-      dbgMsg = "Response from POST " +\
-        BetterClient.PHOTO_UPLOAD + ": "+ respUpload
+      respUpload = respRaw.getInfoStr()
+      dbgMsg = "Response from POST %s: %s" % (
+        BetterClient.PHOTO_UPLOAD , respUpload)
       self.logger.debug(dbgMsg)
 
     for i in self.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
       respRaw = client.softDeletePhoto(i["id"])
       # respTagPhoto = json.loads(respRaw)
-      respTagPhoto = respRaw.info
-      dbgMsg = "Response from POST " + BetterClient.PHOTO_UPDATE + ": "+\
-        respTagPhoto
+      respTagPhoto = respRaw.getInfoStr()
+      dbgMsg = "Response from POST %s: %s" % (
+            BetterClient.PHOTO_UPDATE, respTagPhoto)
       self.logger.debug(dbgMsg)
-      self.logger.debug("Image " + i["id"] + " tagged with " + BetterClient.DELETE_TAG)
+      self.logger.debug("Image %s tagged with %s." % (
+            i["id"], BetterClient.DELETE_TAG))
 
   def syncCustom(self, client):
     for f in self.localonly:
-      self.logger.info("TODO: give user a choice: delete or upload"+ f)
+      self.logger.info("TODO: give user a choice: delete or upload %s." % f)
     for i in self.remoteonly:
-      self.logger.info("TODO: give user a choice: delete or download"+ i["filenameOriginal"])
+      self.logger.info("TODO: give user a choice: delete or download %s.", i["filenameOriginal"])
 
   def populatePhotos(self):
     " Get list of remote images "
     remoteImgs = self.wsClient.getAlbumPhotos(self.remoteId)
     self.logger.debug("Remote images:")
     for i in remoteImgs:
-      self.logger.debug("album(s):"+ str(i["albums"])+ "/"+  i["filenameOriginal"])
+      self.logger.debug("album(s):%s/%s" % (
+            str(i["albums"]), i["filenameOriginal"]))
       self.logger.debug("  "+ i["hash"])
     self.logger.debug("Count: "+ str(len(remoteImgs)))
     if len(remoteImgs) >= self.wsClient.pageSize:
-      self.logger.debug("Capped at " + self.wsClient.pageSize + " (maxPhotos option).")
+      self.logger.debug("Capped at %s (maxPhotos option)." %\
+            self.wsClient.pageSize)
 
     """ Loop through local files and compare against remote images,
         collecting local-onlies and marking common ones. """
@@ -147,20 +153,20 @@ class BetterResponse:
   def __init__(self):
     self.logger = logging.getLogger(APPNAME + ".BetterResponse")
     self.errors = []
-    self.info = ""
+    self.info = {"code": None, "message": None}
     self.data = None
 
   @classmethod
   def fromString(cls, response):
     newObj = cls()
-    newObj.info = response
+    newObj.info = {"message": response}
     return newObj
 
   @classmethod
   def fromDict(cls, response):
     newObj = cls()
     try:
-      newObj.info = str(response["code"]) + ": " + response["message"]
+      newObj.info = {"code": response["code"], "message": response["message"]}
       newObj.data = response["result"]
     except TypeError, e:
       msg = "ERROR: response is not a dict: " + str(response)
@@ -171,13 +177,16 @@ class BetterResponse:
   @classmethod
   def fromMimeMsg(cls, response):
     newObj = cls()
-    newObj.info = str(response)
+    newObj.info = {"message": str(response)}
     return newObj
 
   @classmethod
   def fromJson(cls, response):
     dictResponse = json.loads(response)
     return cls.fromDict(dictResponse)
+
+  def getInfoStr(self):
+    return "%s: %s" % (str(self.info.get("code", "msg")), self.info["message"])
     
 class BetterClient:
   " A proxy to the OpenPhoto client with added methods for download and upload "
@@ -217,7 +226,7 @@ class BetterClient:
     albresp = BetterResponse.fromDict(rawresp)
     remoteAlbums = albresp.data
     debugMsg = "Response from GET %s: %s" % (
-      BetterClient.ALBUMS_LIST, albresp.info)
+      BetterClient.ALBUMS_LIST, albresp.getInfoStr())
     self.logger.debug(debugMsg)
     return remoteAlbums
 
@@ -225,16 +234,21 @@ class BetterClient:
     rawresp = self.opClient.post(BetterClient.ALBUM_CREATE, name=name)
     albresp = BetterResponse.fromDict(rawresp)
     debugMsg = "Response from POST %s: %s" % (
-      BetterClient.ALBUMS_LIST, albresp.info)
+      BetterClient.ALBUMS_LIST, albresp.getInfoStr())
     self.logger.debug(debugMsg)
-    return albresp.data["id"]
+    if albresp.info["code"] == 201:
+      self.logger.debug("Created album '%s' with id %s." % (
+            name, albresp.data["id"]))
+    else:
+      raise Exception
+    return albresp
 
 
   def getAlbumPhotos(self, albumId):
     rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
     #imgresp = json.loads(rawresp) #newer op-lib returns ready-parsed response
     imgresp = BetterResponse.fromDict(rawresp)
-    imgmessage = imgresp.info
+    imgmessage = imgresp.getInfoStr()
     imgresult = imgresp.data
     debugMsg = "Response from GET %s: %s" % (
       BetterClient.PHOTOS_LIST, imgmessage)
