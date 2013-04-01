@@ -70,6 +70,14 @@ to apply it to all subsequent albums):
    delete the file from your local album
    or ignore the file.
 
+Testing
+-------
+Run python `python -m unittest discover -s tests`
+from root directory (this directory)
+or use [nose](https://nose.readthedocs.org/)
+for more fine grained control.
+
+
 Known Issues
 ------------
 Because Trovebox currently autorotate all uploaded images
