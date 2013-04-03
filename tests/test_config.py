@@ -1,10 +1,10 @@
 # test_config.py
 import unittest
-import trovesync
+from trovesync.config import Config
 
-class TestSyncer(unittest.TestCase):
+class TestConfig(unittest.TestCase):
   def test_is_testable(self):
-    ts = trovesync.Config()
+    ts = Config()
     self.assertTrue(True)
   
 
