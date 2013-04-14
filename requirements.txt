@@ -1,0 +1,5 @@
+httplib2==0.7.4
+oauth2==1.5.211
+openphoto==0.2
+poster==0.8.1
+
