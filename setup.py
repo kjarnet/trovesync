@@ -1,10 +1,10 @@
-from distutils.core import setup
+from setuptools import setup
 
 with open('requirements.txt') as f:
     required = f.read().splitlines()
 
 with open('README.md') as f:
-    long_desc = f.read().splitlines()
+    long_desc = f.read()
     
 setup(
     name='trovesync',
