@@ -1,12 +1,12 @@
-# client.py
-
 import logging
 from openphoto import OpenPhoto
 import json
 import urllib2
 import urllib
 import oauth2 as oauth
+import time
 from poster import encode, streaminghttp
+
 
 from config import APPNAME
 
@@ -85,14 +85,38 @@ class BetterClient:
     self.opClient = OpenPhoto(hostName, consumerKey, consumerSecret,
                           token, tokenSecret)
     self.pageSize = pageSize
+
+  def httpGet(self, endpoint, params = {}):
+    params['oauth_version'] =  "1.0"
+    params['oauth_nonce'] = oauth.generate_nonce()
+    params['oauth_timestamp'] = int(time.time())
+    otoken = oauth.Token(key=self.token, secret=self.tokenSecret)
+    oconsumer = oauth.Consumer(key=self.consumerKey, secret=self.consumerSecret)
+    params['oauth_token'] = otoken.key
+    params['oauth_consumer_key'] = oconsumer.key
+    url = "http://%s%s" % (self.hostName, endpoint)
+    req = oauth.Request(method="GET", url=url, parameters=params)
+    signature_method = oauth.SignatureMethod_HMAC_SHA1()
+    req.sign_request(signature_method, oconsumer, otoken)
+    u = self.urlopen(req)
+    meta = u.info()
+    response = u.read()
+    self.logger.info("### response %s" % response)
+    return BetterResponse.fromJson(response)
+
+  def urlopen(self, oauthRequest):
+    self.logger.info("### %s" % oauthRequest.url)
+    request = urllib2.Request(oauthRequest.url)
+    for header, value in oauthRequest.to_header().items():
+      request.add_header(header, value)
+    response = urllib2.urlopen(request)
+    return response
   
   def getAlbums(self):
-    rawresp = self.opClient.get(BetterClient.ALBUMS_LIST)
-    #albresp = json.loads(rawresp) # newer op-lib returns ready-parsed response
-    albresp = BetterResponse.fromDict(rawresp)
-    remoteAlbums = albresp.data
+    resp = self.httpGet(BetterClient.ALBUMS_LIST)
+    remoteAlbums = resp.data
     debugMsg = "Response from GET %s: %s" % (
-      BetterClient.ALBUMS_LIST, albresp.getInfoStr())
+      BetterClient.ALBUMS_LIST, resp.getInfoStr())
     self.logger.debug(debugMsg)
     return remoteAlbums
 
@@ -111,7 +135,7 @@ class BetterClient:
 
 
   def getAlbumPhotos(self, albumId):
-    rawresp = self.opClient.get(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
+    rawresp = self.httpGet(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
     #imgresp = json.loads(rawresp) #newer op-lib returns ready-parsed response
     imgresp = BetterResponse.fromDict(rawresp)
     imgmessage = imgresp.getInfoStr()
