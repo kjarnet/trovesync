@@ -77,20 +77,14 @@ class Album:
       respRaw = client.uploadPhoto(self.remoteId, fullfile)
       # respUpload = json.loads(respRaw)
       respUpload = respRaw.getInfoStr()
-      dbgMsg = "Response from POST %s: %s" % (
-        BetterClient.PHOTO_UPLOAD , respUpload)
-      self.logger.debug(dbgMsg)
+      self.logger.debug("Respons from upload: %s" % respUpload)
 
     for i in self.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
       respRaw = client.softDeletePhoto(i["id"])
       # respTagPhoto = json.loads(respRaw)
       respTagPhoto = respRaw.getInfoStr()
-      dbgMsg = "Response from POST %s: %s" % (
-            BetterClient.PHOTO_UPDATE, respTagPhoto)
-      self.logger.debug(dbgMsg)
-      self.logger.debug("Image %s tagged with %s." % (
-            i["id"], BetterClient.DELETE_TAG))
+      self.logger.debug("Image %s tagged for deletion." % i["id"])
 
   def syncCustom(self, client):
     for f in self.localonly:

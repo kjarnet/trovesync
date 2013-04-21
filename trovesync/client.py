@@ -1,12 +1,9 @@
 import logging
-from openphoto import OpenPhoto
 import json
 import urllib2
 import urllib
 import oauth2 as oauth
-import time
 from poster import encode, streaminghttp
-
 
 from config import APPNAME
 
@@ -26,6 +23,7 @@ class BetterResponse:
   def fromString(cls, response):
     newObj = cls()
     newObj.info = {"message": response}
+    # TODO: Handle error responses
     return newObj
 
   @classmethod
@@ -34,8 +32,9 @@ class BetterResponse:
     try:
       newObj.info = {"code": response["code"], "message": response["message"]}
       newObj.data = response["result"]
+      # TODO: Handle error responses
     except TypeError, e:
-      msg = "ERROR: response is not a dict: " + str(response)
+      msg = "ERROR: response is not a dict: %s" % response
       newObj.logger.error(msg)
       raise
     return newObj
@@ -44,6 +43,7 @@ class BetterResponse:
   def fromMimeMsg(cls, response):
     newObj = cls()
     newObj.info = {"message": str(response)}
+      # TODO: Handle error responses
     return newObj
 
   @classmethod
@@ -64,6 +64,9 @@ class BetterClient:
   PHOTO_UPLOAD = "/photo/upload.json"
   PHOTO_UPDATE = "/photo/%s/update.json"
 
+  METHOD_GET = "GET"
+  METHOD_POST = "POST"
+
   " Other constants: "
   DELETE_TAG = "trovesyncDelete"
 
@@ -82,96 +85,54 @@ class BetterClient:
     self.consumerSecret = consumerSecret
     self.token = token
     self.tokenSecret = tokenSecret
-    self.opClient = OpenPhoto(hostName, consumerKey, consumerSecret,
-                          token, tokenSecret)
     self.pageSize = pageSize
 
-  def httpGet(self, endpoint, params = {}):
-    params['oauth_version'] =  "1.0"
-    params['oauth_nonce'] = oauth.generate_nonce()
-    params['oauth_timestamp'] = int(time.time())
-    otoken = oauth.Token(key=self.token, secret=self.tokenSecret)
-    oconsumer = oauth.Consumer(key=self.consumerKey, secret=self.consumerSecret)
-    params['oauth_token'] = otoken.key
-    params['oauth_consumer_key'] = oconsumer.key
+  def getUrl(self, endpoint, parameters={}):
     url = "http://%s%s" % (self.hostName, endpoint)
-    req = oauth.Request(method="GET", url=url, parameters=params)
-    signature_method = oauth.SignatureMethod_HMAC_SHA1()
-    req.sign_request(signature_method, oconsumer, otoken)
-    u = self.urlopen(req)
+    encparams = urllib.urlencode(parameters)
+    urlWithParams = url + "?" + encparams
+    return urlWithParams
+
+  def httpPost(self, endpoint, params = {}):
+    url = self.getUrl(endpoint)
+    headers = self.getOauthHeaders(
+        url, BetterClient.METHOD_POST, params)
+    paramString = urllib.urlencode(params)
+    self.logger.debug("### POSTing to %s with data %s" % (url, paramString))
+    requestObject = urllib2.Request(url, data=paramString, headers=headers)
+    u = urllib2.urlopen(requestObject)
     meta = u.info()
     response = u.read()
-    self.logger.info("### response %s" % response)
     return BetterResponse.fromJson(response)
 
-  def urlopen(self, oauthRequest):
-    self.logger.info("### %s" % oauthRequest.url)
-    request = urllib2.Request(oauthRequest.url)
-    for header, value in oauthRequest.to_header().items():
-      request.add_header(header, value)
-    response = urllib2.urlopen(request)
-    return response
-  
-  def getAlbums(self):
-    resp = self.httpGet(BetterClient.ALBUMS_LIST)
-    remoteAlbums = resp.data
-    debugMsg = "Response from GET %s: %s" % (
-      BetterClient.ALBUMS_LIST, resp.getInfoStr())
-    self.logger.debug(debugMsg)
-    return remoteAlbums
+  def httpGet(self, endpoint, params = {}):
+    url = self.getUrl(endpoint)
+    urlWithParams = self.getUrl(endpoint, params)
+    headers = self.getOauthHeaders(url, BetterClient.METHOD_GET, params)
+    requestObject = urllib2.Request(urlWithParams, headers=headers)
+    u = urllib2.urlopen(requestObject)
+    meta = u.info()
+    response = u.read()
+    return BetterResponse.fromJson(response)
 
-  def createAlbum(self, name):
-    rawresp = self.opClient.post(BetterClient.ALBUM_CREATE, name=name)
-    albresp = BetterResponse.fromDict(rawresp)
-    debugMsg = "Response from POST %s: %s" % (
-      BetterClient.ALBUMS_LIST, albresp.getInfoStr())
-    self.logger.debug(debugMsg)
-    if albresp.info["code"] == 201:
-      self.logger.debug("Created album '%s' with id %s." % (
-            name, albresp.data["id"]))
-    else:
-      raise Exception
-    return albresp
-
-
-  def getAlbumPhotos(self, albumId):
-    rawresp = self.httpGet(BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
-    #imgresp = json.loads(rawresp) #newer op-lib returns ready-parsed response
-    imgresp = BetterResponse.fromDict(rawresp)
-    imgmessage = imgresp.getInfoStr()
-    imgresult = imgresp.data
-    debugMsg = "Response from GET %s: %s" % (
-      BetterClient.PHOTOS_LIST, imgmessage)
-    self.logger.debug(debugMsg)
-    remoteImgs = [i for i in imgresult if albumId in i["albums"]]
-    return remoteImgs
-
-  def softDeletePhoto(self, photoId):
-    url = BetterClient.PHOTO_UPDATE % photoId
-    respTagPhoto = self.opClient.post(url, tagsAdd = [BetterClient.DELETE_TAG])
-    return BetterResponse.fromDict(respTagPhoto)
-
-
-  def getOauthHeaders(self, url, method):
+  def getOauthHeaders(self, url, method, params = {}):
     " Build headers using oauth2 "
-    parameters = None
-    consumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
-    access_token = oauth.Token(self.token, self.tokenSecret)
-    sig_method = oauth.SignatureMethod_HMAC_SHA1()
-
-    oauth_request = oauth.Request.from_consumer_and_token(
-            consumer, token=access_token, http_method=method, 
-            http_url=url, parameters=parameters
+    otoken = oauth.Token(self.token, self.tokenSecret)
+    oconsumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
+    req = oauth.Request.from_consumer_and_token(
+            oconsumer, token=otoken, http_method=method, 
+            http_url=url, parameters=params
         )
-    oauth_request.sign_request(sig_method, consumer, access_token)
-    headers = oauth_request.to_header()
-    headers['User-Agent'] = 'Trovesync'
+    signature_method = oauth.SignatureMethod_HMAC_SHA1()
+    req.sign_request(signature_method, oconsumer, otoken)
+    headers = req.to_header()
+    #headers['User-Agent'] = 'Trovesync'
     return headers
 
   def download(self, url, filename, filesize):
     """ Download file (copied from stackoverflow q. 22676) """
     self.logger.debug("saving as" + filename)
-    headers = self.getOauthHeaders(url, "GET")
+    headers = self.getOauthHeaders(url, BetterClient.METHOD_GET)
     requestObject = urllib2.Request(url, headers=headers)
     self.logger.debug("made request"+ requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
@@ -191,20 +152,60 @@ class BetterClient:
         self.logger.info(status)
     return BetterResponse.fromMimeMsg(meta)
 
-  def uploadPhoto(self, albumId, fileName):
-    url = "http://" + self.hostName + BetterClient.PHOTO_UPLOAD
-    return self.upload(url, fileName, {"albums": albumId})
-    
-  def upload(self, url, fileName, parameters):
-    self.logger.debug("Uploading " + fileName + " to " + url)
-    encparams = urllib.urlencode(parameters)
-    urlWithParams = url + "?" + encparams
+  def upload(self, endpoint, fileName, parameters):
+    #endpWithParams = endpoint + "?" + urllib.urlencode(parameters) # Multipart post requests needs to pass parameters in url due to a bug on server.
+    self.logger.debug("Uploading " + fileName + " to " + self.getUrl(endpoint, parameters))
     streaminghttp.register_openers()
     with open(fileName, "rb") as localfile:
       datagen, headers = encode.multipart_encode({"photo": localfile})
-      headers.update(self.getOauthHeaders(urlWithParams, "POST"))
-      request = urllib2.urlopen(urllib2.Request(urlWithParams, datagen, headers))
-    response = request.read()
+      oheaders = self.getOauthHeaders(self.getUrl(endpoint), BetterClient.METHOD_POST, parameters) #, headers)) # TODO: should I pass in headers here?
+      headers.update(oheaders)
+      request = urllib2.Request(self.getUrl(endpoint, parameters), datagen, headers)
+      resource = urllib2.urlopen(request)
+    response = resource.read()
     return BetterResponse.fromJson(response)
   
+  def uploadPhoto(self, albumId, fileName):
+    return self.upload(BetterClient.PHOTO_UPLOAD, fileName, {"albums": albumId})
+    
+  def getAlbums(self):
+    resp = self.httpGet(BetterClient.ALBUMS_LIST)
+    remoteAlbums = resp.data
+    debugMsg = "Response from GET %s: %s" % (
+      BetterClient.ALBUMS_LIST, resp.getInfoStr())
+    self.logger.debug(debugMsg)
+    return remoteAlbums
+
+  def createAlbum(self, name):
+    self.logger.debug("Creating album with name '%s'" % name)
+    albresp = self.httpPost(BetterClient.ALBUM_CREATE, {"name": name})
+    debugMsg = "Response from POST %s: %s" % (
+      BetterClient.ALBUMS_LIST, albresp.getInfoStr())
+    self.logger.debug(debugMsg)
+    if albresp.info["code"] == 201:
+      self.logger.debug("Created album '%s' with id %s." % (
+            name, albresp.data["id"]))
+    else:
+      raise Exception
+    return albresp
+
+
+  def getAlbumPhotos(self, albumId):
+    imgresp  = self.httpGet(
+        BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
+    imgmessage = imgresp.getInfoStr()
+    imgresult = imgresp.data
+    debugMsg = "Response from GET %s: %s" % (
+      BetterClient.PHOTOS_LIST, imgmessage)
+    self.logger.debug(debugMsg)
+    remoteImgs = [i for i in imgresult if albumId in i["albums"]]
+    return remoteImgs
+
+  def softDeletePhoto(self, photoId):
+    url = BetterClient.PHOTO_UPDATE % photoId
+    respTagPhoto = self.httpPost(url, tagsAdd = [BetterClient.DELETE_TAG])
+    return BetterResponse.fromDict(respTagPhoto)
+
+
+
 

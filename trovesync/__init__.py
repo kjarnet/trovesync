@@ -82,7 +82,7 @@ class Syncer:
       else: # looped through remote albums without finding m.
         self.logger.info("Album '%s' doesn't exist on the remote." % remoteName)
         if "a" not in doCreate:
-          doCreate = ask("Do you want to create it?", ["y","n", "ya"])
+          doCreate = self.ask("Do you want to create it?", ["y","n", "ya"])
         if "y" not in doCreate:
           self.logger.error("Missing remote album '%s' - can not continue!" % remoteName)
           sys.exit(1)
