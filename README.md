@@ -2,7 +2,7 @@ TroveSync
 =========
 
 Application for synchronizing a local folder with a trovebox.com album.
-**NB: This is to be considered pre-alpha software
+**NB: This is to be considered alpha software
 and may very well delete your photos locally and/or remotely!
 Please do not use without a safe bacup of all your photos!**
 
@@ -21,7 +21,6 @@ Dependencies
 ------------
 
 * python-oauth2
-* [openphoto-python](https://github.com/photo/openphoto-python) rev:925342072d
 * [poster](http://atlee.ca/software/poster/)
 
 Usage
@@ -101,6 +100,13 @@ _before_ uploading to Trovebox.
 
 Change history
 --------------
+#### Version 0.4
+- Removed dependency on openphoto-python
+- Added setup.py script for easier installation (untested)
+- Added a few unit tests
+- Automatic creation of missing remote albums
+- Major refactor, splitting into several modules
+
 #### Version 0.3
 - Local folders are now scanned recursively for \*.jpg-files.
 - Logging is improved and is now also outputted to a file.
