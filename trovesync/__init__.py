@@ -11,17 +11,63 @@ from models import Album
 
 __metaclass__ = type # make sure we use new-style classes
 
+class Settings:
+  """ Users credentials and other settings. """
+
+  def __init__( self,
+                host,
+                consumerKey,
+                consumerSecret,
+                token,
+                tokenSecret,
+                albumsPath = ".",
+                backupDirName = "bak",
+                maxPhotos = 1000,
+                albumMappings = []
+              ):
+    self.logger = logging.getLogger(APPNAME + ".Settings")
+    self.credentials = {
+      "hostName": host,
+      "consumerKey": consumerKey,
+      "consumerSecret": consumerSecret,
+      "token": token,
+      "tokenSecret": tokenSecret,
+      "pageSize": maxPhotos
+    }
+    self.albumsPath = albumsPath
+    self.backupDirName = backupDirName
+    self.albumMappings = albumMappings
+
+  @classmethod
+  def fromFile(cls, filepath):
+    logger = logging.getLogger(APPNAME + ".Settings")
+    with open(filepath) as credfile:
+      cred = json.load(credfile)
+    logger.debug("cred.json: %s" % cred)
+    newObj = cls( 
+                cred["host"],
+                cred["consumerKey"],
+                cred["consumerSecret"],
+                cred["token"],
+                cred["tokenSecret"],
+                cred["albumsPath"],
+                cred["backupDirName"],
+                cred["maxPhotos"],
+                cred["albums"]
+                  )
+    return newObj
+
+
 class Syncer:
   """ The main class for the application that does all user interaction. """
 
-
-  def __init__(self):
+  def __init__(self, settings):
     " Constructor for Syncer "
     self.logger = logging.getLogger(APPNAME + ".Syncer")
     self.initLogging(self.logger)
-    self.loadSettings()
-    self.initClient(self.cred)
-    self.albumsPath = self.cred["albumsPath"]
+    self.settings = settings
+    self.initClient()
+    self.albumsPath = self.settings.albumsPath
     
 
   def initLogging(self, logger):
@@ -46,29 +92,17 @@ class Syncer:
     logger.addHandler(ch)
     logger.info("Initialized logger")
 
-  def loadSettings(self):
-    " Credentials "
-    with open("./cred.json") as credfile:
-      self.cred = json.load(credfile)
-    self.logger.debug("cred.json: %s" % self.cred)
 
-  def initClient(self, cred):
+  def initClient(self):
     """ Initialize a webservice client """
-    self.troveboxClient = BetterClient(
-      cred["host"],
-      cred["consumerKey"],
-      cred["consumerSecret"],
-      cred["token"],
-      cred["tokenSecret"],
-      cred["maxPhotos"]
-      )
+    self.troveboxClient = BetterClient(**self.settings.credentials)
 
   def sync(self):
     """ Choose albums to synchronize """
     remoteAlbums = self.troveboxClient.getAlbums()
     remoteAlbumNames = [a["name"] for a in remoteAlbums]
     self.logger.info(remoteAlbumNames)
-    albumMappings = self.cred["albums"]
+    albumMappings = self.settings.albumMappings
     albums = []
     self.logger.info("Remote albums: " )
     doCreate = ""
@@ -89,7 +123,7 @@ class Syncer:
       localpath = path.join(self.albumsPath, m["localName"])
       albums.append(
         Album(localpath, remoteId, remoteName, 
-          self.cred["backupDirName"], self.troveboxClient), 
+          self.settings.backupDirName, self.troveboxClient), 
         )
 
     direction = ""
