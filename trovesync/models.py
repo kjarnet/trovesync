@@ -31,32 +31,39 @@ class Album:
     self.localonly = []
     self.remoteonly = []
     self.populatePhotos()
-    self.prepareLocal()
-    self.prepareRemote()
 
-  def prepareLocal(self):
-    """ Preparations needing to be made to local folders
-        (typically called by __init__) """
-    if(not path.isdir(self.localpath)):
-      raise Exception
-    backupPath = path.join(self.localpath, self.backupDir)
-    if(not path.isdir(backupPath)):
-      self.logger.debug("Creating backup-folder: " + backupPath)
-      makedirs(backupPath)
+  def hasLocal(self):
+    return path.isdir(self.localpath))
 
-  def prepareRemote(self):
-    """ Preparations needing to be made to remote album
-        (typically called by __init__) """
-    if self.remoteId is None:
-      resp = self.wsClient.createAlbum(self.remoteName)
-      self.remoteId = resp.data["id"]
+  def hasBackupDir(self):
+    return path.isdir(getBackupPath())):
+
+  def getBackupPath(self):
+    return path.join(self.localpath, self.backupDir)
+
+  def hasRemote(self):
+    return not self.remoteId is None
+
 
   def syncFromRemote(self, client):
+    """ Delete local onlies and download remote onlies. """
+    jobs = []
+
+    if not self.hasRemote():
+      raise
+
+    if not self.hasLocal():
+      jobs.append(CreateDirLocalJob(self.localpath))
+
+    if not self.hasBackupDir():
+      jobs.append(CreateDirLocalJob(self.getBackupPath()))
+
     for f in self.localonly:
-      fullfile = path.join(self.localpath, f)
-      backupPath = path.join(self.localpath, self.backupDir)
-      self.logger.debug("move local image "+ fullfile + " to backup location "+ backupPath)
-      shutil.move(fullfile, backupPath)
+      filePath = path.join(self.localpath, f)
+      backupPath = path.join(self.localpath, self.backupDir, f)
+      self.logger.debug("move local image "+ filePath + " to backup location "+ backupPath)
+      jobs.append(DeletePhotoLocalJob(filePath, backupPath))
+
     for i in self.remoteonly:
       self.logger.debug("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
       localFullfile = path.join(self.localpath, i["filenameOriginal"])
@@ -64,27 +71,34 @@ class Album:
       fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
       if downloadPath != fixedDownloadPath:
         self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
-      respDownload = client.download(
-          fixedDownloadPath, localFullfile, int(i["size"])*1024)
+      size = int(i["size"])*1024
+      jobs.append(DownloadPhotoJob(fixedDownloadPath, localFullfile, size))
       dbgMsg = "Response from GET %s: %s" % (
             i["pathDownload"], respDownload.getInfoStr())
       self.logger.debug(dbgMsg)
 
+      return jobs
+
   def syncFromLocal(self, client):
+    """ Upload local onlies and delete remote onlies. """
+    jobs = []
+
+    if not self.hasLocal():
+      raise
+
+    if not self.hasRemote():
+      jobs.append(CreateAlbumJob(self))
+
     for f in self.localonly:
       self.logger.debug("upload to remote "+ f)
       fullfile = path.join(self.localpath, f)
-      respRaw = client.uploadPhoto(self.remoteId, fullfile)
-      # respUpload = json.loads(respRaw)
-      respUpload = respRaw.getInfoStr()
-      self.logger.debug("Respons from upload: %s" % respUpload)
+      jobs.append(UploadPhotoJob(fullfile, self))
 
     for i in self.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
-      respRaw = client.softDeletePhoto(i["id"])
-      # respTagPhoto = json.loads(respRaw)
-      respTagPhoto = respRaw.getInfoStr()
-      self.logger.debug("Image %s tagged for deletion." % i["id"])
+      jobs.append(DeletePhotoJob(i["id"]))
+
+    return jobs
 
   def syncCustom(self, client):
     for f in self.localonly:
@@ -92,18 +106,23 @@ class Album:
     for i in self.remoteonly:
       self.logger.info("TODO: give user a choice: delete or download %s.", i["filenameOriginal"])
 
-  def populatePhotos(self):
+  def getRemotePhotos(self, client):
     " Get list of remote images "
-    remoteImgs = self.wsClient.getAlbumPhotos(self.remoteId)
-    self.logger.debug("Remote images:")
-    for i in remoteImgs:
-      self.logger.debug("album(s):%s/%s" % (
-            str(i["albums"]), i["filenameOriginal"]))
-      self.logger.debug("  "+ i["hash"])
-    self.logger.debug("Count: "+ str(len(remoteImgs)))
-    if len(remoteImgs) >= self.wsClient.pageSize:
-      self.logger.debug("Capped at %s (maxPhotos option)." %\
+    remotePhotos = self.wsClient.getAlbumPhotos(self.remoteId)
+    numPhotos = len(remotePhotos)
+    if numPhotos >= self.wsClient.pageSize:
+      self.logger.warn("Capped at %s (maxPhotos option)." %\
             self.wsClient.pageSize)
+    self.logger.debug("Remote photos (%d):" % numPhotos)
+    debugFormat = "album(s):%s/%s\n  %s"
+    imgDebugInfo = [debugFormat %\
+      ( i["albums"], i["filenameOriginal"], i["hash"])\
+      for i in remotePhotos]
+    self.logger.debug(imgDebugInfo.join("\n")
+    return remotePhotos
+
+  def populatePhotos(self):
+    remotePhotos = getRemotePhotos(self.wsClient)
 
     """ Loop through local files and compare against remote images,
         collecting local-onlies and marking common ones. """

@@ -66,7 +66,6 @@ class Syncer:
     self.logger = logging.getLogger(APPNAME + ".Syncer")
     self.initLogging(self.logger)
     self.settings = settings
-    self.initClient()
     self.albumsPath = self.settings.albumsPath
     
 
@@ -93,19 +92,14 @@ class Syncer:
     logger.info("Initialized logger")
 
 
-  def initClient(self):
-    """ Initialize a webservice client """
-    self.troveboxClient = BetterClient(**self.settings.credentials)
-
-  def sync(self):
-    """ Choose albums to synchronize """
-    remoteAlbums = self.troveboxClient.getAlbums()
+  def createAlbums(self, albumMappings, remoteAlbums):
+    """ Creates Albums from the data in albumMappings
+      and finds the remote ids from a list of remoteAlbums
+      based on the remote album name. """
     remoteAlbumNames = [a["name"] for a in remoteAlbums]
     self.logger.info(remoteAlbumNames)
-    albumMappings = self.settings.albumMappings
     albums = []
     self.logger.info("Remote albums: " )
-    doCreate = ""
     for m in albumMappings:
       remoteId = None
       remoteName = m["remoteName"]
@@ -113,18 +107,16 @@ class Syncer:
         if remoteName == a["name"]:
           remoteId = a["id"]
           break
-      else: # looped through remote albums without finding m.
-        self.logger.info("Album '%s' doesn't exist on the remote." % remoteName)
-        if "a" not in doCreate:
-          doCreate = self.ask("Do you want to create it?", ["y","n", "ya"])
-        if "y" not in doCreate:
-          self.logger.error("Missing remote album '%s' - can not continue!" % remoteName)
-          sys.exit(1)
       localpath = path.join(self.albumsPath, m["localName"])
       albums.append(
         Album(localpath, remoteId, remoteName, 
-          self.settings.backupDirName, self.troveboxClient), 
+          self.settings.backupDirName, self.troveboxClient)
         )
+    return albums
+
+  def sync(self, client):
+    """ Choose albums to synchronize """
+    albums = self.createAlbums(self.settings.albumMappings, client.getAlbums())
 
     direction = ""
     for album in albums:
@@ -147,13 +139,29 @@ class Syncer:
       """ Synchronize! """
       if "r" in direction:
         self.logger.info("Syncing remote changes to local folder.")
-        album.syncFromRemote(self.troveboxClient)
+        jobs = album.syncFromRemote(client)
       elif "l" in direction:
         self.logger.info("Syncing local changes to remote album.")
-        album.syncFromLocal(self.troveboxClient)
+        jobs = album.syncFromLocal(client)
       else:
         self.logger.info("Custom syncing.")
-        album.syncCustom(self.troveboxClient)
+        jobs = album.syncCustom(client)
+
+      doContinue = self.ask("Do you want to execute these jobs %s?" % jobs,
+        ["y", "n"])
+      if doContinue != "y":
+          self.logger.error("Missing remote album '%s' - can not continue!" % remoteName)
+          sys.exit(1)
+
+      for j in jobs:
+        if isinstance(j, RemoteJob):
+          j.execute(client)
+        elif isinstance(j, LocalJob):
+          j.execute()
+        else
+          raise Exception()
+
+
 
   def ask(self, question, accept):
     """ Ask the user a question and accept an array of answers. 

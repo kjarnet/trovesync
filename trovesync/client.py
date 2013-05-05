@@ -9,6 +9,8 @@ from config import APPNAME
 
 __metaclass__ = type # make sure we use new-style classes
 
+
+
 class BetterResponse:
   """ A wrapper for the response from webservice calls,
   to unify output and handle errors """
@@ -152,11 +154,11 @@ class BetterClient:
         self.logger.info(status)
     return BetterResponse.fromMimeMsg(meta)
 
-  def upload(self, endpoint, fileName, parameters):
+  def upload(self, endpoint, filePath, parameters):
     #endpWithParams = endpoint + "?" + urllib.urlencode(parameters) # Multipart post requests needs to pass parameters in url due to a bug on server.
-    self.logger.debug("Uploading " + fileName + " to " + self.getUrl(endpoint, parameters))
+    self.logger.debug("Uploading " + filePath + " to " + self.getUrl(endpoint, parameters))
     streaminghttp.register_openers()
-    with open(fileName, "rb") as localfile:
+    with open(filePath, "rb") as localfile:
       datagen, headers = encode.multipart_encode({"photo": localfile})
       oheaders = self.getOauthHeaders(self.getUrl(endpoint), BetterClient.METHOD_POST, parameters) #, headers)) # TODO: should I pass in headers here?
       headers.update(oheaders)
@@ -165,20 +167,37 @@ class BetterClient:
     response = resource.read()
     return BetterResponse.fromJson(response)
   
-  def uploadPhoto(self, albumId, fileName):
-    return self.upload(BetterClient.PHOTO_UPLOAD, fileName, {"albums": albumId})
-    
-  def getAlbums(self):
-    resp = self.httpGet(BetterClient.ALBUMS_LIST)
-    remoteAlbums = resp.data
-    debugMsg = "Response from GET %s: %s" % (
-      BetterClient.ALBUMS_LIST, resp.getInfoStr())
-    self.logger.debug(debugMsg)
-    return remoteAlbums
 
-  def createAlbum(self, name):
-    self.logger.debug("Creating album with name '%s'" % name)
-    albresp = self.httpPost(BetterClient.ALBUM_CREATE, {"name": name})
+class RemoteJob:
+
+  def __init__(self):
+    pass
+
+  def execute(self, client):
+    pass
+
+
+class DeletePhotoJob(RemoteJob):
+
+  def __init__(self, photoId):
+    self.photoId = photoId
+
+  def execute(self, client):
+    url = BetterClient.PHOTO_UPDATE % self.photoId
+    respTagPhoto = client.httpPost(url, tagsAdd = [BetterClient.DELETE_TAG])
+    return BetterResponse.fromDict(respTagPhoto)
+
+  def __str__(self):
+    return "Delete remote photo %s (soft deletion)" % self.photoId
+
+class CreateAlbumJob(RemoteJob):
+
+  def __init__(self, album):
+    self.album = album
+
+  def execute(self, client):
+    self.logger.debug("Creating album with name '%s'" % self.name)
+    albresp = client.httpPost(BetterClient.ALBUM_CREATE, {"name": self.name})
     debugMsg = "Response from POST %s: %s" % (
       BetterClient.ALBUMS_LIST, albresp.getInfoStr())
     self.logger.debug(debugMsg)
@@ -187,11 +206,35 @@ class BetterClient:
             name, albresp.data["id"]))
     else:
       raise Exception
+    self.album.remoteId = albresp.data["id"] # TODO: This deviates from the convention in the rest of the remote jobs
     return albresp
 
+  def __str__(self):
+    return "Job: Create remote album %s" % self.name
 
-  def getAlbumPhotos(self, albumId):
-    imgresp  = self.httpGet(
+
+class DownloadPhotoJob(RemoteJob):
+
+  def __init__(self, url, filePath, fileSize):
+    self.url = url
+    self.filePath = filePath
+    self.fileSize = fileSize
+
+  def execute(self, client):
+    return client.download(self.url, self.filePath, self.fileSize)
+
+  def __str__(self):
+    return "Job: Download remote photo (%d KB) from %s to %s" % (
+      self.fileSize/1000, self.url, self.filePath)
+
+class GetPhotoListJob(RemoteJob):
+
+  def __init__(self, albumId):
+    self.albumId = albumId
+
+  def execute(self, client):
+    # TODO: Check if there is a service to get photos on an album
+    imgresp  = client.httpGet(
         BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
     imgmessage = imgresp.getInfoStr()
     imgresult = imgresp.data
@@ -199,13 +242,71 @@ class BetterClient:
       BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
     remoteImgs = [i for i in imgresult if albumId in i["albums"]]
-    return remoteImgs
+    imgresp.data = remoteImgs # TODO: Avoid altering the response data somehow
+    return imgresp
 
-  def softDeletePhoto(self, photoId):
-    url = BetterClient.PHOTO_UPDATE % photoId
-    respTagPhoto = self.httpPost(url, tagsAdd = [BetterClient.DELETE_TAG])
-    return BetterResponse.fromDict(respTagPhoto)
+  def __str__(self):
+    return "Job: Get list of remote photos in album %s." % self.albumId
+
+class GetAlbumListJob(RemoteJob):
+
+  def __init__(self):
+    pass
+
+  def execute(self, client):
+    return client.httpGet(BetterClient.ALBUMS_LIST)
+
+  def __str__(self):
+    return "Job: Get list of remote albums."
+
+class UploadPhotoJob(RemoteJob):
+
+  def __init__(self, filePath, album):
+    # NB: Album may not have albumId set yet (see CreateAlbumJob)
+    self.filePath = filePath
+    self.album = album
+
+  def execute(self, client):
+    if self.album.remoteId is None:
+      raise
+    return client.upload(
+      BetterClient.PHOTO_UPLOAD, self.filePath, {"albums": self.album.remoteId})
+
+  def __str__(self):
+    return "Job: Upload photo %s to remote album %s (id: %s)" % (
+      self.filePath, self.album.remoteName, self.album.remoteId)
 
 
 
+# TODO: Local jobs doesn't really belong in client.py
+class LocalJob:
+  def __init__(self):
+    pass
+
+  def execute(self):
+    pass
+
+class DeletePhotoLocalJob(LocalJob):
+
+  def __init__(self, filePath, backupPath):
+    self.filePath = filePath
+    self.backupPath = backupPath
+
+  def execute(self):
+    shutil.move(self.filePath, self.backupPath)
+
+  def __str__(self):
+    return "Job: Delete local photo %s (backup to %s)" % (
+      self.filePath, self.backupPath)
+
+class CreateDirLocalJob(LocalJob):
+
+  def __init__(self, fullPath):
+    self.fullPath = fullPath
+
+  def execute(self):
+    makedirs(self.fullpath)
+
+  def __str__(self):
+    return "Job: Create local directory %s." % self.fullPath
 
