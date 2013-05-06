@@ -1,13 +1,12 @@
-# __init__.py
-
 import sys
 import logging
 import json
 from os import path
+import re
 
 from config import APPNAME
-from client import BetterClient
 from models import Album
+from client import RemoteJob, LocalJob, GetAlbumListJob, CreateDirLocalJob, DeletePhotoLocalJob, DownloadPhotoJob, CreateAlbumJob, UploadPhotoJob, DeletePhotoJob, GetPhotoListLocalJob, GetPhotoListRemoteJob
 
 __metaclass__ = type # make sure we use new-style classes
 
@@ -114,9 +113,11 @@ class Syncer:
         )
     return albums
 
+
   def sync(self, client):
     """ Choose albums to synchronize """
-    albums = self.createAlbums(self.settings.albumMappings, client.getAlbums())
+    remoteAlbums = GetAlbumListJob().execute(client).data
+    albums = self.createAlbums(self.settings.albumMappings, remoteAlbums)
 
     direction = ""
     for album in albums:
@@ -126,8 +127,8 @@ class Syncer:
       self.logger.info("Local only: %s" % album.localonly)
       self.logger.info("Remote only: %s" % remoteOnlyNames)
 
+      """ Choose sync direction """
       if "a" not in direction:
-        """ Choose sync direction """
         syncQuestion = "Do you want to sync " +\
           "[r]emote changes to local folder, " +\
           "[l]ocal changes to remote album or " +\
@@ -150,7 +151,7 @@ class Syncer:
       doContinue = self.ask("Do you want to execute these jobs %s?" % jobs,
         ["y", "n"])
       if doContinue != "y":
-          self.logger.error("Missing remote album '%s' - can not continue!" % remoteName)
+          self.logger.info("User quit.")
           sys.exit(1)
 
       for j in jobs:
@@ -158,10 +159,71 @@ class Syncer:
           j.execute(client)
         elif isinstance(j, LocalJob):
           j.execute()
-        else
+        else:
           raise Exception()
 
+  def prepareAlbum(self, album, client):
+    if not album.hasLocal():
+      CreateDirLocalJob(album.localpath).execute(client)
 
+    if not album.hasBackupDir():
+      CreateDirLocalJob(album.getBackupPath()).execute(client)
+
+    if not album.hasRemote():
+      doCreate = self.ask("Album %s doesn't exist on the remote. Do you want to create it?" % album.remoteName, ["y","n"])
+      if "y" not in doCreate:
+        self.logger.error("Missing remote album %s." % album.remoteName)
+        sys.exit(1)
+      CreateAlbumJob(album).execute(client)
+
+    localPhotos = GetPhotoListLocalJob(album.localPath).execute().data
+    remotePhotos = GetPhotoListRemoteJob(album.remoteId).execute(client).data
+    album.populatePhotos(localPhotos, remotePhotos)
+
+
+
+  def syncFromRemote(self, album):
+    """ Delete local onlies and download remote onlies. """
+    jobs = []
+
+    for f in album.localonly:
+      filePath = path.join(album.localpath, f)
+      backupPath = path.join(album.localpath, album.backupDir, f)
+      self.logger.debug("move local image "+ filePath + " to backup location "+ backupPath)
+      jobs.append(DeletePhotoLocalJob(filePath, backupPath))
+
+    for i in album.remoteonly:
+      self.logger.debug("download image"+ i["filenameOriginal"]+ " from "+ i["pathDownload"])
+      localFullfile = path.join(album.localpath, i["filenameOriginal"])
+      downloadPath = i["pathDownload"]
+      fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
+      if downloadPath != fixedDownloadPath:
+        self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
+      size = int(i["size"])*1024
+      jobs.append(DownloadPhotoJob(fixedDownloadPath, localFullfile, size))
+
+      return jobs
+
+  def syncFromLocal(self, album):
+    """ Upload local onlies and delete remote onlies. """
+    jobs = []
+
+    for f in album.localonly:
+      self.logger.debug("upload to remote "+ f)
+      fullfile = path.join(album.localpath, f)
+      jobs.append(UploadPhotoJob(fullfile, album))
+
+    for i in album.remoteonly:
+      self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
+      jobs.append(DeletePhotoJob(i["id"]))
+
+    return jobs
+
+  def syncCustom(self, album):
+    for f in album.localonly:
+      self.logger.info("TODO: give user a choice: delete or upload %s." % f)
+    for i in album.remoteonly:
+      self.logger.info("TODO: give user a choice: delete or download %s.", i["filenameOriginal"])
 
   def ask(self, question, accept):
     """ Ask the user a question and accept an array of answers. 

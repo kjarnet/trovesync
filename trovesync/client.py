@@ -4,6 +4,10 @@ import urllib2
 import urllib
 import oauth2 as oauth
 from poster import encode, streaminghttp
+import shutil
+from os import makedirs, path, walk
+import re
+import hashlib
 
 from config import APPNAME
 
@@ -36,7 +40,7 @@ class BetterResponse:
       newObj.data = response["result"]
       # TODO: Handle error responses
     except TypeError, e:
-      msg = "ERROR: response is not a dict: %s" % response
+      msg = "ERROR: response is not a dict: %s. Error: %s" % (response, e)
       newObj.logger.error(msg)
       raise
     return newObj
@@ -103,7 +107,7 @@ class BetterClient:
     self.logger.debug("### POSTing to %s with data %s" % (url, paramString))
     requestObject = urllib2.Request(url, data=paramString, headers=headers)
     u = urllib2.urlopen(requestObject)
-    meta = u.info()
+    #meta = u.info()
     response = u.read()
     return BetterResponse.fromJson(response)
 
@@ -113,7 +117,7 @@ class BetterClient:
     headers = self.getOauthHeaders(url, BetterClient.METHOD_GET, params)
     requestObject = urllib2.Request(urlWithParams, headers=headers)
     u = urllib2.urlopen(requestObject)
-    meta = u.info()
+    #meta = u.info()
     response = u.read()
     return BetterResponse.fromJson(response)
 
@@ -196,21 +200,21 @@ class CreateAlbumJob(RemoteJob):
     self.album = album
 
   def execute(self, client):
-    self.logger.debug("Creating album with name '%s'" % self.name)
-    albresp = client.httpPost(BetterClient.ALBUM_CREATE, {"name": self.name})
+    self.logger.debug("Creating album with name '%s'" % self.album.remoteName)
+    albresp = client.httpPost(BetterClient.ALBUM_CREATE, {"name": self.album.remoteName})
     debugMsg = "Response from POST %s: %s" % (
       BetterClient.ALBUMS_LIST, albresp.getInfoStr())
     self.logger.debug(debugMsg)
     if albresp.info["code"] == 201:
       self.logger.debug("Created album '%s' with id %s." % (
-            name, albresp.data["id"]))
+            self.album.remoteName, albresp.data["id"]))
     else:
       raise Exception
     self.album.remoteId = albresp.data["id"] # TODO: This deviates from the convention in the rest of the remote jobs
     return albresp
 
   def __str__(self):
-    return "Job: Create remote album %s" % self.name
+    return "Job: Create remote album %s" % self.album.remoteName
 
 
 class DownloadPhotoJob(RemoteJob):
@@ -241,8 +245,20 @@ class GetPhotoListJob(RemoteJob):
     debugMsg = "Response from GET %s: %s" % (
       BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
-    remoteImgs = [i for i in imgresult if albumId in i["albums"]]
-    imgresp.data = remoteImgs # TODO: Avoid altering the response data somehow
+    remotePhotos = [i for i in imgresult if self.albumId in i["albums"]]
+
+    numPhotos = len(remotePhotos)
+    if numPhotos >= self.wsClient.pageSize:
+      self.logger.warn("Capped at %s (maxPhotos option)." %\
+            self.wsClient.pageSize)
+    self.logger.debug("Remote photos (%d):" % numPhotos)
+    debugFormat = "album(s):%s/%s\n  %s"
+    imgDebugInfo = [debugFormat %\
+      ( i["albums"], i["filenameOriginal"], i["hash"])\
+      for i in remotePhotos]
+    self.logger.debug(imgDebugInfo.join("\n"))
+
+    imgresp.data = remotePhotos # TODO: Avoid altering the response data somehow
     return imgresp
 
   def __str__(self):
@@ -277,6 +293,14 @@ class UploadPhotoJob(RemoteJob):
       self.filePath, self.album.remoteName, self.album.remoteId)
 
 
+# TODO: This is supposed to be an interface to all filesystem-touching jobs
+class FileSystem:
+
+  " Constants "
+  PHOTO_FILEPATTERN = ".*\\.jpg$"
+
+  def __init__(self):
+    pass
 
 # TODO: Local jobs doesn't really belong in client.py
 class LocalJob:
@@ -309,4 +333,27 @@ class CreateDirLocalJob(LocalJob):
 
   def __str__(self):
     return "Job: Create local directory %s." % self.fullPath
+
+class GetPhotoListLocalJob(LocalJob):
+
+  def __init__(self, albumPath):
+    self.albumPath = albumPath
+
+  def execute(self):
+    localPhotos = [] # tuples of (relPath, fileName, hash)
+    rePhotoPattern = re.compile(FileSystem.PHOTO_FILEPATTERN, re.IGNORECASE)
+    absLocalPath = path.abspath(self.albumPath)
+    for currentPath, subFolders, files in walk(absLocalPath):
+      if self.backupDir in subFolders:
+        subFolders.remove(self.backupDir)
+      relativePath = path.relpath(currentPath, absLocalPath)
+      photoFiles = filter(rePhotoPattern.search, files)
+      for filename in photoFiles:
+        fullfile = path.join(absLocalPath, relativePath, filename)
+        self.logger.debug(fullfile)
+        with open(fullfile, "rb") as imgFile:
+          sha = hashlib.sha1(imgFile.read()).hexdigest()
+          self.logger.debug("  "+ sha)
+        localPhotos.append((relativePath, filename, sha))
+    return localPhotos
 
