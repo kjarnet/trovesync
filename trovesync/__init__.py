@@ -6,7 +6,7 @@ import re
 
 from config import APPNAME
 from models import Album
-from client import RemoteJob, LocalJob, GetAlbumListJob, CreateDirLocalJob, DeletePhotoLocalJob, DownloadPhotoJob, CreateAlbumJob, UploadPhotoJob, DeletePhotoJob, GetPhotoListLocalJob, GetPhotoListRemoteJob
+from client import RemoteJob, LocalJob, GetAlbumListRemoteJob, CreateDirLocalJob, DeletePhotoLocalJob, DownloadPhotoRemoteJob, CreateAlbumRemoteJob, UploadPhotoRemoteJob, DeletePhotoRemoteJob, GetPhotoListLocalJob, GetPhotoListRemoteJob
 
 __metaclass__ = type # make sure we use new-style classes
 
@@ -109,15 +109,18 @@ class Syncer:
       localpath = path.join(self.albumsPath, m["localName"])
       albums.append(
         Album(localpath, remoteId, remoteName, 
-          self.settings.backupDirName, self.troveboxClient)
+          self.settings.backupDirName)
         )
     return albums
 
 
   def sync(self, client):
     """ Choose albums to synchronize """
-    remoteAlbums = GetAlbumListJob().execute(client).data
+    remoteAlbums = GetAlbumListRemoteJob().execute(client).data
     albums = self.createAlbums(self.settings.albumMappings, remoteAlbums)
+
+    for album in albums:
+      self.prepareAlbum(album, client)
 
     direction = ""
     for album in albums:
@@ -140,13 +143,13 @@ class Syncer:
       """ Synchronize! """
       if "r" in direction:
         self.logger.info("Syncing remote changes to local folder.")
-        jobs = album.syncFromRemote(client)
+        jobs = self.syncFromRemote(album)
       elif "l" in direction:
         self.logger.info("Syncing local changes to remote album.")
-        jobs = album.syncFromLocal(client)
+        jobs = self.syncFromLocal(album)
       else:
         self.logger.info("Custom syncing.")
-        jobs = album.syncCustom(client)
+        jobs = self.syncCustom(album)
 
       doContinue = self.ask("Do you want to execute these jobs %s?" % jobs,
         ["y", "n"])
@@ -164,17 +167,17 @@ class Syncer:
 
   def prepareAlbum(self, album, client):
     if not album.hasLocal():
-      CreateDirLocalJob(album.localpath).execute(client)
+      CreateDirLocalJob(album.localpath).execute()
 
     if not album.hasBackupDir():
-      CreateDirLocalJob(album.getBackupPath()).execute(client)
+      CreateDirLocalJob(album.getBackupPath()).execute()
 
     if not album.hasRemote():
       doCreate = self.ask("Album %s doesn't exist on the remote. Do you want to create it?" % album.remoteName, ["y","n"])
       if "y" not in doCreate:
         self.logger.error("Missing remote album %s." % album.remoteName)
         sys.exit(1)
-      CreateAlbumJob(album).execute(client)
+      CreateAlbumRemoteJob(album).execute(client)
 
     localPhotos = GetPhotoListLocalJob(album.localPath).execute().data
     remotePhotos = GetPhotoListRemoteJob(album.remoteId).execute(client).data
@@ -200,7 +203,7 @@ class Syncer:
       if downloadPath != fixedDownloadPath:
         self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
       size = int(i["size"])*1024
-      jobs.append(DownloadPhotoJob(fixedDownloadPath, localFullfile, size))
+      jobs.append(DownloadPhotoRemoteJob(fixedDownloadPath, localFullfile, size))
 
       return jobs
 
@@ -211,11 +214,11 @@ class Syncer:
     for f in album.localonly:
       self.logger.debug("upload to remote "+ f)
       fullfile = path.join(album.localpath, f)
-      jobs.append(UploadPhotoJob(fullfile, album))
+      jobs.append(UploadPhotoRemoteJob(fullfile, album))
 
     for i in album.remoteonly:
       self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
-      jobs.append(DeletePhotoJob(i["id"]))
+      jobs.append(DeletePhotoRemoteJob(i["id"]))
 
     return jobs
 
@@ -224,6 +227,7 @@ class Syncer:
       self.logger.info("TODO: give user a choice: delete or upload %s." % f)
     for i in album.remoteonly:
       self.logger.info("TODO: give user a choice: delete or download %s.", i["filenameOriginal"])
+    return []
 
   def ask(self, question, accept):
     """ Ask the user a question and accept an array of answers. 

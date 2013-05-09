@@ -181,7 +181,7 @@ class RemoteJob:
     pass
 
 
-class DeletePhotoJob(RemoteJob):
+class DeletePhotoRemoteJob(RemoteJob):
 
   def __init__(self, photoId):
     self.photoId = photoId
@@ -194,7 +194,7 @@ class DeletePhotoJob(RemoteJob):
   def __str__(self):
     return "Delete remote photo %s (soft deletion)" % self.photoId
 
-class CreateAlbumJob(RemoteJob):
+class CreateAlbumRemoteJob(RemoteJob):
 
   def __init__(self, album):
     self.album = album
@@ -217,7 +217,7 @@ class CreateAlbumJob(RemoteJob):
     return "Job: Create remote album %s" % self.album.remoteName
 
 
-class DownloadPhotoJob(RemoteJob):
+class DownloadPhotoRemoteJob(RemoteJob):
 
   def __init__(self, url, filePath, fileSize):
     self.url = url
@@ -231,7 +231,7 @@ class DownloadPhotoJob(RemoteJob):
     return "Job: Download remote photo (%d KB) from %s to %s" % (
       self.fileSize/1000, self.url, self.filePath)
 
-class GetPhotoListJob(RemoteJob):
+class GetPhotoListRemoteJob(RemoteJob):
 
   def __init__(self, albumId):
     self.albumId = albumId
@@ -264,7 +264,7 @@ class GetPhotoListJob(RemoteJob):
   def __str__(self):
     return "Job: Get list of remote photos in album %s." % self.albumId
 
-class GetAlbumListJob(RemoteJob):
+class GetAlbumListRemoteJob(RemoteJob):
 
   def __init__(self):
     pass
@@ -275,7 +275,7 @@ class GetAlbumListJob(RemoteJob):
   def __str__(self):
     return "Job: Get list of remote albums."
 
-class UploadPhotoJob(RemoteJob):
+class UploadPhotoRemoteJob(RemoteJob):
 
   def __init__(self, filePath, album):
     # NB: Album may not have albumId set yet (see CreateAlbumJob)
