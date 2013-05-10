@@ -10,14 +10,13 @@ class Album:
   """ Class to hold state of album-synchronization """
 
 
-  def __init__(self, localpath, remoteId, remoteName, backupDir):
+  def __init__(self, localpath, remoteName, backupDir):
     self.logger = logging.getLogger(APPNAME + ".Album")
     self.localpath = localpath
-    self.remoteId = remoteId
     self.remoteName = remoteName
     self.backupDir = backupDir
-    self.localonly = []
-    self.remoteonly = []
+    self.remoteId = None
+    self._photos = []
 
   def hasLocal(self):
     return path.isdir(self.localpath)
@@ -31,23 +30,35 @@ class Album:
   def hasRemote(self):
     return not self.remoteId is None
 
-
-  def populatePhotos(self, localPhotos, remotePhotos):
-
-    """ Loop through local files and compare against remote images,
-        collecting local-onlies and marking common ones. """
-    self.logger.debug("Local files:")
-
-    for relPath, filename, sha in localPhotos:
-      for i in remotePhotos:
-        if i["hash"] == sha:
-          i["inSync"] = True
+  def setLocalPhotos(self, photos):
+    newPhotos = []
+    for newp in photos:
+      for exp in self._photos:
+        if newp.filehash == exp.filehash:
+          exp.localName = newp.localName
+          exp.localRelPath = newp.localRelPath
           break
-      else: # for-else executes when for-loop terminates normally (not by break)
-        self.localonly.append(Photo(filename, relPath, None, None))
+      else: # Not found in existing photos (may be localonly)
+        newPhotos.append(newp)
+    self._photos += newPhotos
+    
 
-    " Add not-marked remotes to remoteonly. "
-    self.remoteonly = [Photo(None, None, i["name"], i["hash"]) for i in remotePhotos if "inSync" not in i]
+  def setRemotePhotos(self, photos):
+    newPhotos = []
+    for newp in photos:
+      for exp in self._photos:
+        if newp.filehash == exp.filehash:
+          exp.remoteName = newp.remoteName
+          break
+      else: # Not found in existing photos (may be remoteonly)
+        newPhotos.append(newp)
+    self._photos += newPhotos
+
+  def getRemoteOnly(self):
+    return [p for p in self._photos if p.localName is None]
+
+  def getLocalOnly(self):
+    return [p for p in self._photos if p.remoteName is None]
 
 class Photo:
   def __init__(self, localName, localRelPath, remoteName, filehash):

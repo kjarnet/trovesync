@@ -95,35 +95,53 @@ class Syncer:
     """ Creates Albums from the data in albumMappings
       and finds the remote ids from a list of remoteAlbums
       based on the remote album name. """
+    self.logger.info("Remote albums: " )
     remoteAlbumNames = [a["name"] for a in remoteAlbums]
     self.logger.info(remoteAlbumNames)
     albums = []
-    self.logger.info("Remote albums: " )
     for m in albumMappings:
-      remoteId = None
       remoteName = m["remoteName"]
+      localpath = path.join(self.albumsPath, m["localName"])
+      album = Album(localpath, remoteName, 
+          self.settings.backupDirName)
       for a in remoteAlbums:
         if remoteName == a["name"]:
-          remoteId = a["id"]
+          album.remoteId = a["id"]
           break
-      localpath = path.join(self.albumsPath, m["localName"])
-      albums.append(
-        Album(localpath, remoteId, remoteName, 
-          self.settings.backupDirName)
-        )
+      albums.append(album)
     return albums
 
 
   def sync(self, client):
     """ Choose albums to synchronize """
     remoteAlbums = GetAlbumListRemoteJob().execute(client).data
-    albums = self.createAlbums(self.settings.albumMappings, remoteAlbums)
+    albums  = self.createAlbums(self.settings.albumMappings, remoteAlbums)
 
+    prepJobs = []
     for album in albums:
-      self.prepareAlbum(album, client)
+      prepJobs += self.prepareAlbum(album, client)
+
+    if prepJobs:
+      q = "Some albums are missing remote or local folders. "
+      q += "Do you want to fix them by executing these tasks:"
+      q += "\n%s?" % prepJobs
+      doPrepare = self.ask(q, ["y", "n"])
+      if doPrepare == "y":
+        for j in prepJobs:
+          if isinstance(j, RemoteJob):
+            j.execute(client)
+          elif isinstance(j, LocalJob):
+            j.execute()
+          else:
+            raise Exception()
 
     direction = ""
     for album in albums:
+      if not album.hasRemote()\
+            or not album.hasLocal()\
+            or not album.hasBackupDir():
+        self.logger.warning("Skipping album %s which has not been initialized." % album.remoteName)
+        continue
       remoteOnlyNames = [i["filenameOriginal"] for i in album.remoteonly]
       self.logger.info("Syncing album %s against folder %s." % (
         album.remoteName, album.localpath))
@@ -166,23 +184,21 @@ class Syncer:
           raise Exception()
 
   def prepareAlbum(self, album, client):
-    if not album.hasLocal():
-      CreateDirLocalJob(album.localpath).execute()
+    jobs = []
+    if album.hasRemote():
+      jobs.append(GetPhotoListRemoteJob(album))
+    else:
+      jobs.append(CreateAlbumRemoteJob(album))
+
+    if album.hasLocal():
+      jobs.append(GetPhotoListLocalJob(album))
+    else:
+      jobs.append(CreateDirLocalJob(album.localpath))
 
     if not album.hasBackupDir():
-      CreateDirLocalJob(album.getBackupPath()).execute()
+      jobs.append(CreateDirLocalJob(album.getBackupPath()))
 
-    if not album.hasRemote():
-      doCreate = self.ask("Album %s doesn't exist on the remote. Do you want to create it?" % album.remoteName, ["y","n"])
-      if "y" not in doCreate:
-        self.logger.error("Missing remote album %s." % album.remoteName)
-        sys.exit(1)
-      CreateAlbumRemoteJob(album).execute(client)
-
-    localPhotos = GetPhotoListLocalJob(album.localPath).execute().data
-    remotePhotos = GetPhotoListRemoteJob(album.remoteId).execute(client).data
-    album.populatePhotos(localPhotos, remotePhotos)
-
+    return jobs
 
 
   def syncFromRemote(self, album):

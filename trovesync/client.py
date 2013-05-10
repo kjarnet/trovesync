@@ -10,6 +10,7 @@ import re
 import hashlib
 
 from config import APPNAME
+from models import Photo
 
 __metaclass__ = type # make sure we use new-style classes
 
@@ -233,8 +234,8 @@ class DownloadPhotoRemoteJob(RemoteJob):
 
 class GetPhotoListRemoteJob(RemoteJob):
 
-  def __init__(self, albumId):
-    self.albumId = albumId
+  def __init__(self, album):
+    self.album= album
 
   def execute(self, client):
     # TODO: Check if there is a service to get photos on an album
@@ -245,7 +246,8 @@ class GetPhotoListRemoteJob(RemoteJob):
     debugMsg = "Response from GET %s: %s" % (
       BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
-    remotePhotos = [i for i in imgresult if self.albumId in i["albums"]]
+    remotePhotos = [Photo(None, None, i["name"], i["hash"])
+        for i in imgresult if self.albumId in i["albums"]]
 
     numPhotos = len(remotePhotos)
     if numPhotos >= self.wsClient.pageSize:
@@ -258,7 +260,7 @@ class GetPhotoListRemoteJob(RemoteJob):
       for i in remotePhotos]
     self.logger.debug(imgDebugInfo.join("\n"))
 
-    imgresp.data = remotePhotos # TODO: Avoid altering the response data somehow
+    self.album.setRemotePhotos(remotePhotos)
     return imgresp
 
   def __str__(self):
@@ -336,11 +338,11 @@ class CreateDirLocalJob(LocalJob):
 
 class GetPhotoListLocalJob(LocalJob):
 
-  def __init__(self, albumPath):
-    self.albumPath = albumPath
+  def __init__(self, album):
+    self.album= album
 
   def execute(self):
-    localPhotos = [] # tuples of (relPath, fileName, hash)
+    localPhotos = []
     rePhotoPattern = re.compile(FileSystem.PHOTO_FILEPATTERN, re.IGNORECASE)
     absLocalPath = path.abspath(self.albumPath)
     for currentPath, subFolders, files in walk(absLocalPath):
@@ -354,6 +356,10 @@ class GetPhotoListLocalJob(LocalJob):
         with open(fullfile, "rb") as imgFile:
           sha = hashlib.sha1(imgFile.read()).hexdigest()
           self.logger.debug("  "+ sha)
-        localPhotos.append((relativePath, filename, sha))
-    return localPhotos
+        localPhotos.append(Photo(filename, relativePath, None, sha))
+    self.album.setLocalPhotos(localPhotos)
+    return
 
+  def __str__(self):
+    return "Job: Get list of local photos in album %s." % self.album.localName
+    
