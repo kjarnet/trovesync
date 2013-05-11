@@ -1,5 +1,4 @@
 import logging
-import hashlib
 from os import path
 
 from config import APPNAME
@@ -61,10 +60,12 @@ class Album:
     return [p for p in self._photos if p.remoteName is None]
 
 class Photo:
-  def __init__(self, localName, localRelPath, remoteName, filehash):
+  def __init__(self, localName, localRelPath, remoteName, remoteRelPath, filehash, fileSize):
     self.logger = logging.getLogger(APPNAME + ".Photo")
     self.localName = localName
     self.localRelPath = localRelPath
     self.remoteName = remoteName
+    self.remoteRelPath = remoteRelPath
     self.filehash = filehash
+    self.fileSize = fileSize
 

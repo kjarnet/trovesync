@@ -246,7 +246,7 @@ class GetPhotoListRemoteJob(RemoteJob):
     debugMsg = "Response from GET %s: %s" % (
       BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
-    remotePhotos = [Photo(None, None, i["name"], i["hash"])
+    remotePhotos = [Photo(None, None, i["title"], i["pathOriginal"], i["hash"], i["size"])
         for i in imgresult if self.albumId in i["albums"]]
 
     numPhotos = len(remotePhotos)
@@ -254,10 +254,10 @@ class GetPhotoListRemoteJob(RemoteJob):
       self.logger.warn("Capped at %s (maxPhotos option)." %\
             self.wsClient.pageSize)
     self.logger.debug("Remote photos (%d):" % numPhotos)
-    debugFormat = "album(s):%s/%s\n  %s"
+    debugFormat = "album:%s/%s\n  %s"
     imgDebugInfo = [debugFormat %\
-      ( i["albums"], i["filenameOriginal"], i["hash"])\
-      for i in remotePhotos]
+      ( self.album.name, p.remoteName, p.filehash)\
+      for p in remotePhotos]
     self.logger.debug(imgDebugInfo.join("\n"))
 
     self.album.setRemotePhotos(remotePhotos)
@@ -355,8 +355,9 @@ class GetPhotoListLocalJob(LocalJob):
         self.logger.debug(fullfile)
         with open(fullfile, "rb") as imgFile:
           sha = hashlib.sha1(imgFile.read()).hexdigest()
+          size = None # TODO: Find size (for upload)
           self.logger.debug("  "+ sha)
-        localPhotos.append(Photo(filename, relativePath, None, sha))
+        localPhotos.append(Photo(filename, relativePath, None, None, sha, size))
     self.album.setLocalPhotos(localPhotos)
     return
 
