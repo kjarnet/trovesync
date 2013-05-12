@@ -124,6 +124,8 @@ class BetterClient:
 
   def getOauthHeaders(self, url, method, params = None):
     " Build headers using oauth2 "
+    self.logger.debug("Building oauth headers for %s request to %s" %\
+        (method, url))
     otoken = oauth.Token(self.token, self.tokenSecret)
     oconsumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
     req = oauth.Request.from_consumer_and_token(
@@ -139,8 +141,10 @@ class BetterClient:
   def download(self, url, filename, filesize):
     """ Download file (copied from stackoverflow q. 22676) """
     self.logger.debug("saving as %s." % filename)
-    headers = self.getOauthHeaders(url, BetterClient.METHOD_GET)
-    requestObject = urllib2.Request(url, headers=headers)
+    # trovebox' api seems unstable - now it does not accept oauth headers.
+    #headers = self.getOauthHeaders(url, BetterClient.METHOD_GET)
+    #requestObject = urllib2.Request(url, headers=headers)
+    requestObject = urllib2.Request(url)
     self.logger.debug("made request %s." % requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
     meta = u.info()
