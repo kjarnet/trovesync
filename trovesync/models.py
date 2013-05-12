@@ -9,22 +9,22 @@ class Album:
   """ Class to hold state of album-synchronization """
 
 
-  def __init__(self, localpath, remoteName, backupDir):
+  def __init__(self, localPath, remoteName, backupDir):
     self.logger = logging.getLogger(APPNAME + ".Album")
-    self.localpath = localpath
+    self.localPath = localPath
     self.remoteName = remoteName
     self.backupDir = backupDir
     self.remoteId = None
     self._photos = []
 
   def hasLocal(self):
-    return path.isdir(self.localpath)
+    return path.isdir(self.localPath)
 
   def hasBackupDir(self):
     return path.isdir(self.getBackupPath())
 
   def getBackupPath(self):
-    return path.join(self.localpath, self.backupDir)
+    return path.join(self.localPath, self.backupDir)
 
   def hasRemote(self):
     return not self.remoteId is None
@@ -48,6 +48,7 @@ class Album:
       for exp in self._photos:
         if newp.filehash == exp.filehash:
           exp.remoteName = newp.remoteName
+          exp.remotePath = newp.remotePath
           break
       else: # Not found in existing photos (may be remoteonly)
         newPhotos.append(newp)
@@ -60,12 +61,13 @@ class Album:
     return [p for p in self._photos if p.remoteName is None]
 
 class Photo:
-  def __init__(self, localName, localRelPath, remoteName, remoteRelPath, filehash, fileSize):
+  def __init__(self, localName, localRelPath,
+      remoteName, remotePath, filehash, fileSize):
     self.logger = logging.getLogger(APPNAME + ".Photo")
     self.localName = localName
     self.localRelPath = localRelPath
     self.remoteName = remoteName
-    self.remoteRelPath = remoteRelPath
+    self.remotePath = remotePath
     self.filehash = filehash
     self.fileSize = fileSize
 

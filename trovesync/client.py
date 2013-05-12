@@ -122,7 +122,7 @@ class BetterClient:
     response = u.read()
     return BetterResponse.fromJson(response)
 
-  def getOauthHeaders(self, url, method, params = {}):
+  def getOauthHeaders(self, url, method, params = None):
     " Build headers using oauth2 "
     otoken = oauth.Token(self.token, self.tokenSecret)
     oconsumer = oauth.Consumer(self.consumerKey, self.consumerSecret)
@@ -138,10 +138,10 @@ class BetterClient:
 
   def download(self, url, filename, filesize):
     """ Download file (copied from stackoverflow q. 22676) """
-    self.logger.debug("saving as" + filename)
+    self.logger.debug("saving as %s." % filename)
     headers = self.getOauthHeaders(url, BetterClient.METHOD_GET)
     requestObject = urllib2.Request(url, headers=headers)
-    self.logger.debug("made request"+ requestObject.get_full_url())
+    self.logger.debug("made request %s." % requestObject.get_full_url())
     u = urllib2.urlopen(requestObject)
     meta = u.info()
     self.logger.info("Downloading: %s Bytes: %s" % (filename, filesize))
@@ -176,7 +176,7 @@ class BetterClient:
 class RemoteJob:
 
   def __init__(self):
-    pass
+    self.logger = logging.getLogger(APPNAME + ".RemoteJob")
 
   def execute(self, client):
     pass
@@ -186,6 +186,7 @@ class DeletePhotoRemoteJob(RemoteJob):
 
   def __init__(self, photoId):
     self.photoId = photoId
+    super(DeletePhotoRemoteJob, self).__init__()
 
   def execute(self, client):
     url = BetterClient.PHOTO_UPDATE % self.photoId
@@ -199,6 +200,7 @@ class CreateAlbumRemoteJob(RemoteJob):
 
   def __init__(self, album):
     self.album = album
+    super(CreateAlbumRemoteJob, self).__init__()
 
   def execute(self, client):
     self.logger.debug("Creating album with name '%s'" % self.album.remoteName)
@@ -224,6 +226,7 @@ class DownloadPhotoRemoteJob(RemoteJob):
     self.url = url
     self.filePath = filePath
     self.fileSize = fileSize
+    super(DownloadPhotoRemoteJob, self).__init__()
 
   def execute(self, client):
     return client.download(self.url, self.filePath, self.fileSize)
@@ -236,40 +239,41 @@ class GetPhotoListRemoteJob(RemoteJob):
 
   def __init__(self, album):
     self.album= album
+    super(GetPhotoListRemoteJob, self).__init__()
 
   def execute(self, client):
     # TODO: Check if there is a service to get photos on an album
     imgresp  = client.httpGet(
-        BetterClient.PHOTOS_LIST, {"pageSize": self.pageSize})
+        BetterClient.PHOTOS_LIST, {"pageSize": client.pageSize})
     imgmessage = imgresp.getInfoStr()
     imgresult = imgresp.data
     debugMsg = "Response from GET %s: %s" % (
       BetterClient.PHOTOS_LIST, imgmessage)
     self.logger.debug(debugMsg)
-    remotePhotos = [Photo(None, None, i["title"], i["pathOriginal"], i["hash"], i["size"])
-        for i in imgresult if self.albumId in i["albums"]]
+    remotePhotos = [Photo(None, None, i["filenameOriginal"], i["pathOriginal"], i["hash"], i["size"])
+        for i in imgresult if self.album.remoteId in i["albums"]]
 
     numPhotos = len(remotePhotos)
-    if numPhotos >= self.wsClient.pageSize:
+    if numPhotos >= client.pageSize:
       self.logger.warn("Capped at %s (maxPhotos option)." %\
-            self.wsClient.pageSize)
+            client.pageSize)
     self.logger.debug("Remote photos (%d):" % numPhotos)
     debugFormat = "album:%s/%s\n  %s"
     imgDebugInfo = [debugFormat %\
-      ( self.album.name, p.remoteName, p.filehash)\
+      ( self.album.remoteName, p.remoteName, p.filehash)\
       for p in remotePhotos]
-    self.logger.debug(imgDebugInfo.join("\n"))
+    self.logger.debug("\n".join(imgDebugInfo))
 
     self.album.setRemotePhotos(remotePhotos)
     return imgresp
 
   def __str__(self):
-    return "Job: Get list of remote photos in album %s." % self.albumId
+    return "Job: Get list of remote photos in album %s." % self.album.remoteName
 
 class GetAlbumListRemoteJob(RemoteJob):
 
   def __init__(self):
-    pass
+    super(GetAlbumListRemoteJob, self).__init__()
 
   def execute(self, client):
     return client.httpGet(BetterClient.ALBUMS_LIST)
@@ -283,6 +287,7 @@ class UploadPhotoRemoteJob(RemoteJob):
     # NB: Album may not have albumId set yet (see CreateAlbumJob)
     self.filePath = filePath
     self.album = album
+    super(UploadPhotoRemoteJob, self).__init__()
 
   def execute(self, client):
     if self.album.remoteId is None:
@@ -307,7 +312,7 @@ class FileSystem:
 # TODO: Local jobs doesn't really belong in client.py
 class LocalJob:
   def __init__(self):
-    pass
+    self.logger = logging.getLogger(APPNAME + ".RemoteJob")
 
   def execute(self):
     pass
@@ -317,6 +322,7 @@ class DeletePhotoLocalJob(LocalJob):
   def __init__(self, filePath, backupPath):
     self.filePath = filePath
     self.backupPath = backupPath
+    super(DeletePhotoLocalJob, self).__init__()
 
   def execute(self):
     shutil.move(self.filePath, self.backupPath)
@@ -329,25 +335,28 @@ class CreateDirLocalJob(LocalJob):
 
   def __init__(self, fullPath):
     self.fullPath = fullPath
+    super(CreateDirLocalJob, self).__init__()
 
   def execute(self):
-    makedirs(self.fullpath)
+    makedirs(self.fullPath)
 
   def __str__(self):
     return "Job: Create local directory %s." % self.fullPath
 
 class GetPhotoListLocalJob(LocalJob):
 
-  def __init__(self, album):
-    self.album= album
+  def __init__(self, album, albumsPath):
+    self.album = album
+    self.albumsPath = albumsPath
+    super(GetPhotoListLocalJob, self).__init__()
 
   def execute(self):
     localPhotos = []
     rePhotoPattern = re.compile(FileSystem.PHOTO_FILEPATTERN, re.IGNORECASE)
-    absLocalPath = path.abspath(self.albumPath)
+    absLocalPath = path.join(self.albumsPath, self.album.localPath)
     for currentPath, subFolders, files in walk(absLocalPath):
-      if self.backupDir in subFolders:
-        subFolders.remove(self.backupDir)
+      if self.album.backupDir in subFolders:
+        subFolders.remove(self.album.backupDir)
       relativePath = path.relpath(currentPath, absLocalPath)
       photoFiles = filter(rePhotoPattern.search, files)
       for filename in photoFiles:
@@ -362,5 +371,5 @@ class GetPhotoListLocalJob(LocalJob):
     return
 
   def __str__(self):
-    return "Job: Get list of local photos in album %s." % self.album.localName
+    return "Job: Get list of local photos in album %s." % self.album.localPath
     

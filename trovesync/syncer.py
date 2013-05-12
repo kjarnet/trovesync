@@ -1,5 +1,4 @@
 import logging
-import json
 from os import path
 import re
 
@@ -8,53 +7,6 @@ from models import Album
 from client import CreateDirLocalJob, DeletePhotoLocalJob, DownloadPhotoRemoteJob, CreateAlbumRemoteJob, UploadPhotoRemoteJob, DeletePhotoRemoteJob, GetPhotoListLocalJob, GetPhotoListRemoteJob
 
 __metaclass__ = type # make sure we use new-style classes
-
-class Settings:
-  """ Users credentials and other settings. """
-
-  def __init__( self,
-                host,
-                consumerKey,
-                consumerSecret,
-                token,
-                tokenSecret,
-                albumsPath = ".",
-                backupDirName = "bak",
-                maxPhotos = 1000,
-                albumMappings = []
-              ):
-    self.logger = logging.getLogger(APPNAME + ".Settings")
-    self.credentials = {
-      "hostName": host,
-      "consumerKey": consumerKey,
-      "consumerSecret": consumerSecret,
-      "token": token,
-      "tokenSecret": tokenSecret,
-      "pageSize": maxPhotos
-    }
-    self.albumsPath = albumsPath
-    self.backupDirName = backupDirName
-    self.albumMappings = albumMappings
-
-  @classmethod
-  def fromFile(cls, filepath):
-    logger = logging.getLogger(APPNAME + ".Settings")
-    with open(filepath) as credfile:
-      cred = json.load(credfile)
-    logger.debug("cred.json: %s" % cred)
-    newObj = cls( 
-                cred["host"],
-                cred["consumerKey"],
-                cred["consumerSecret"],
-                cred["token"],
-                cred["tokenSecret"],
-                cred["albumsPath"],
-                cred["backupDirName"],
-                cred["maxPhotos"],
-                cred["albums"]
-                  )
-    return newObj
-
 
 class Syncer:
   """ The main class for the application that does all user interaction. """
@@ -100,8 +52,8 @@ class Syncer:
     albums = []
     for m in albumMappings:
       remoteName = m["remoteName"]
-      localpath = path.join(self.albumsPath, m["localName"])
-      album = Album(localpath, remoteName, 
+      localPath = path.join(self.albumsPath, m["localName"])
+      album = Album(localPath, remoteName, 
           self.settings.backupDirName)
       for a in remoteAlbums:
         if remoteName == a["name"]:
@@ -120,12 +72,14 @@ class Syncer:
       jobs.append(CreateAlbumRemoteJob(album))
 
     if album.hasLocal():
-      jobs.append(GetPhotoListLocalJob(album))
+      jobs.append(GetPhotoListLocalJob(album, self.albumsPath))
     else:
-      jobs.append(CreateDirLocalJob(album.localpath))
+      absLocalPath = path.join(self.albumsPath, album.localPath)
+      jobs.append(CreateDirLocalJob(absLocalPath))
 
     if not album.hasBackupDir():
-      jobs.append(CreateDirLocalJob(album.getBackupPath()))
+      absBackupPath = path.join(self.albumsPath, album.getBackupPath())
+      jobs.append(CreateDirLocalJob(absBackupPath))
 
     return jobs
 
@@ -135,44 +89,45 @@ class Syncer:
     self.logger.info("Syncing remote changes to local folder.")
     jobs = []
 
-    for f in album.localonly:
-      filePath = path.join(album.localpath, f)
-      backupPath = path.join(album.localpath, album.backupDir, f)
+    for f in album.getLocalOnly():
+      filePath = path.join(self.albumsPath, album.localPath, f.localRelPath, f.localName)
+      backupPath = path.join(self.albumsPath, album.getBackupPath(), f.localRelPath, f.localName)
       self.logger.debug("move local image "+ filePath + " to backup location "+ backupPath)
       jobs.append(DeletePhotoLocalJob(filePath, backupPath))
 
-    for p in album.remoteonly:
+    for p in album.getRemoteOnly():
       self.logger.debug("download image"+ p.remoteName + " from "+ p.remotePath)
-      localFullfile = path.join(album.localpath, p.remoteName)
+      localFullfile = path.join(self.albumsPath, album.localPath, p.remoteName)
       downloadPath = p.remotePath
-      fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
+      #fixedDownloadPath = re.sub(r"^http:", "https:", downloadPath)
+      fixedDownloadPath = downloadPath
       if downloadPath != fixedDownloadPath:
         self.logger.warning("fixed protocol in download path to " + fixedDownloadPath)
       size = int(p.fileSize)*1024
       jobs.append(DownloadPhotoRemoteJob(fixedDownloadPath, localFullfile, size))
 
-      return jobs
+    return jobs
 
   def syncFromLocal(self, album):
     """ Upload local onlies and delete remote onlies. """
     self.logger.info("Syncing local changes to remote album.")
     jobs = []
 
-    for f in album.localonly:
-      self.logger.debug("upload to remote "+ f)
-      fullfile = path.join(album.localpath, f)
+    for f in album.getLocalOnly():
+      self.logger.debug("upload to remote %s" % f)
+      fullfile = path.join(self.albumsPath, album.localPath, f.localName)
       jobs.append(UploadPhotoRemoteJob(fullfile, album))
 
-    for i in album.remoteonly:
-      self.logger.debug("tag remote image for deletion " + i["filenameOriginal"])
+    for i in album.getRemoteOnly():
+      self.logger.debug("tag remote image for deletion %s" % i["filenameOriginal"])
       jobs.append(DeletePhotoRemoteJob(i["id"]))
 
     return jobs
 
   def syncCustom(self, album):
     self.logger.info("Custom syncing.")
-    for f in album.localonly:
+    for f in album.getLocalOnly():
       self.logger.info("TODO: give user a choice: delete or upload %s." % f)
-    for i in album.remoteonly:
+    for i in album.getRemoteOnly():
       self.logger.info("TODO: give user a choice: delete or download %s.", i["filenameOriginal"])
     return []

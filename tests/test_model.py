@@ -2,32 +2,28 @@
 import unittest
 from trovesync.models import Photo, Album
 
-class MockClient:
-  def __init__(self):
-    self.pageSize = 1
-
-  def getAlbumPhotos(self, remoteId):
-    return []
-
 class TestPhoto(unittest.TestCase):
   def test_is_testable(self):
-    ts = Photo()
+    localName = "local name"
+    localRelPath = "./something/"
+    remoteName = "remote name"
+    remoteRelPath = "something/something/"
+    filehash = "abcdef"
+    fileSize = 200
+    ts = Photo(localName, localRelPath, 
+      remoteName, remoteRelPath, filehash, fileSize)
     self.assertIsInstance(ts, Photo)
 
 
 class TestAlbum(unittest.TestCase):
   def test_is_testable(self):
-    self.testLocalpath = "./"
-    self.testRemoteId = "xyz"
-    self.testRemoteName = "test album"
-    self.testBackupDir = "bak"
-    self.testWsClient = MockClient()
+    testLocalpath = "./"
+    testRemoteName = "xyz"
+    testBackupDir = "bak"
     ts = Album(
-      self.testLocalpath,
-      self.testRemoteId,
-      self.testRemoteName,
-      self.testBackupDir,
-      self.testWsClient
+      testLocalpath,
+      testRemoteName,
+      testBackupDir,
       )
     self.assertIsInstance(ts, Album)
   
