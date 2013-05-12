@@ -17,9 +17,15 @@ delete your local and/or remote photos.
 See change history for what features are supported
 in which versions.
 
+Build status on master is currently   
+[![Build Status](https://travis-ci.org/kjarnet/trovesync.png?branch=master)](https://travis-ci.org/kjarnet/trovesync)   
+*NB: this does not necessarily reflect the build status of the commit you've currently checked out.*
+
+
 Dependencies
 ------------
 
+* python 2.7
 * python-oauth2
 * [poster](http://atlee.ca/software/poster/)
 
@@ -85,8 +91,8 @@ _before_ storing the original
 and exiftran (for reasons unknown) adds some bytes to the file
 irrespective of whether the image needs rotation or not
 the actual _original_ version of the file is not available
-for downloading from trovebox (see [issue at github]
-(https://github.com/photo/frontend/issues/1149)).
+for downloading from trovebox (see 
+[issue at github](https://github.com/photo/frontend/issues/1149)).
 Furthermore, because the hash stored with the image on Trovebox
 is generated from the _actual original_,
 and as trovesync uses this hash to compare files
@@ -100,6 +106,11 @@ _before_ uploading to Trovebox.
 
 Change history
 --------------
+
+#### Version 0.5
+- Major refactor to prepare for asynchronous webrequests and make it easier to test
+- Travis build is now passing and linked to in readme
+
 #### Version 0.4
 - Removed dependency on openphoto-python
 - Added setup.py script for easier installation (untested)

@@ -358,6 +358,7 @@ class GetPhotoListLocalJob(LocalJob):
     localPhotos = []
     rePhotoPattern = re.compile(FileSystem.PHOTO_FILEPATTERN, re.IGNORECASE)
     absLocalPath = path.join(self.albumsPath, self.album.localPath)
+    self.logger.debug("Local photos:")
     for currentPath, subFolders, files in walk(absLocalPath):
       if self.album.backupDir in subFolders:
         subFolders.remove(self.album.backupDir)
